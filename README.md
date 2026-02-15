@@ -26,6 +26,12 @@ This folder contains a cleaned, shareable version of the Support ICY Toolkit wit
    - `npm install`
 4. Configure DB credentials:
    - Copy `python/DBscript/.env.example` to `python/DBscript/.env` and fill values.
+5. Configure Toolkit servers and SSH:
+   - Open `toolkit.ps1`.
+   - Set `$sshKey` to your local SSH key path.
+   - Update `$servers` with your hostnames and SSH usernames.
+6. Allow running local scripts (CurrentUser scope):
+   - `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
 
 ## Run
 - `toolkit.bat` (recommended)
