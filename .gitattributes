@@ -1,0 +1,20 @@
+* text=auto
+
+# PowerShell
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+
+# Batch
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell
+*.sh text eol=lf
+
+# JSON/MD
+*.json text eol=lf
+*.md text eol=lf
+
+# Python
+*.py text eol=lf
