@@ -656,7 +656,7 @@ def test_build_catalog_search_text_contains_normalized_location_name():
     assert "villa 14" in str(catalog.iloc[0]["search_text"])
 
 
-def test_build_persisted_state_keeps_refresh_values_without_password():
+def test_build_persisted_state_keeps_only_safe_url_values():
     state = {
         "db_host_override": "auto",
         "db_host_manual": "icyccdb.icy.nl",
@@ -669,18 +669,48 @@ def test_build_persisted_state_keeps_refresh_values_without_password():
         "slave_filter": "50",
         "selected_location": "Camperplek - 016",
         "search_text": "wall socket",
+        "mid_filter": "Alleen NON MID",
         "db_ready": True,
         "current_record_index": 3,
     }
 
     persisted = pulse_tool.build_persisted_state(state)
 
-    assert persisted["db_name"] == "nl_icydemopark"
-    assert persisted["user_initials"] == "HN"
     assert persisted["selected_location"] == "Camperplek - 016"
-    assert persisted["db_ready"] == "1"
+    assert persisted["mid_filter"] == "Alleen NON MID"
     assert persisted["current_record_index"] == "3"
+    assert "db_host_manual" not in persisted
+    assert "db_name" not in persisted
+    assert "db_user" not in persisted
+    assert "user_initials" not in persisted
     assert "db_password" not in persisted
+    assert "search_text" not in persisted
+    assert "db_ready" not in persisted
+
+
+def test_sync_persisted_state_removes_sensitive_query_params(monkeypatch):
+    fake_st = fake_streamlit(
+        session_state={
+            "selected_location": "Alle locaties",
+            "mid_filter": "Alle meters",
+            "current_record_index": 0,
+        },
+        query_params={
+            "db_host_manual": "icyccdb.icy.nl",
+            "db_name": "nl_icydemopark",
+            "db_user": "HVNijdam",
+            "user_initials": "HVN",
+            "selected_location": "Alle locaties",
+        },
+    )
+    monkeypatch.setattr(pulse_tool, "st", fake_st)
+
+    pulse_tool.sync_persisted_state()
+
+    assert "db_host_manual" not in fake_st.query_params
+    assert "db_name" not in fake_st.query_params
+    assert "db_user" not in fake_st.query_params
+    assert "user_initials" not in fake_st.query_params
 
 
 def test_search_text_can_be_cleared_when_switching_database():

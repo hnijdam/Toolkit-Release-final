@@ -109,6 +109,12 @@ PERSISTED_STATE_DEFAULTS = {
     "current_record_index": 0,
 }
 
+URL_SAFE_STATE_KEYS = {
+    "mid_filter",
+    "selected_location",
+    "current_record_index",
+}
+
 ENV_BACKED_STATE_KEYS = {
     "db_host_manual": "DB_HOST",
     "db_name": "DB_NAME",
@@ -180,13 +186,11 @@ def parse_persisted_state_value(key, value):
 
 def build_persisted_state(state):
     persisted = {}
-    for key, default_value in PERSISTED_STATE_DEFAULTS.items():
+    for key in URL_SAFE_STATE_KEYS:
+        default_value = PERSISTED_STATE_DEFAULTS.get(key, "")
         value = parse_persisted_state_value(key, state.get(key, default_value))
 
-        if key == "db_ready":
-            if value:
-                persisted[key] = "1"
-        elif key == "current_record_index":
+        if key == "current_record_index":
             persisted[key] = str(value)
         elif value != "":
             persisted[key] = value
@@ -201,7 +205,7 @@ def restore_persisted_state():
         query_params = {}
 
     for key, default_value in PERSISTED_STATE_DEFAULTS.items():
-        raw_value = query_params.get(key, default_value)
+        raw_value = query_params.get(key, default_value) if key in URL_SAFE_STATE_KEYS else default_value
         parsed_value = parse_persisted_state_value(key, raw_value)
 
         if parsed_value in {"", None} and key in ENV_BACKED_STATE_KEYS:
@@ -228,7 +232,7 @@ def sync_persisted_state():
 
     target = build_persisted_state(st.session_state)
     current = {}
-    for key in PERSISTED_STATE_DEFAULTS:
+    for key in URL_SAFE_STATE_KEYS:
         if key in query_params:
             current[key] = parse_persisted_state_value(key, query_params.get(key))
 
