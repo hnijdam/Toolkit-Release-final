@@ -226,6 +226,62 @@ def test_build_catalog_applies_meterdivider_to_display_values():
     assert row["effective_reading"] == 3.0
 
 
+def test_build_catalog_prefers_slave_meterdivider_over_device_meterdivider():
+    log_df = pd.DataFrame(
+        [
+            {"pulsecounterlogid": 1, "value": 10730, "timestamp": "2026-04-18", "deviceid": "25", "slavedeviceid": "14", "channel": None},
+        ]
+    )
+    slave_df = pd.DataFrame([
+        {"slavedeviceid": "14", "deviceid": "25", "locationid": "29", "name": "Socket 14", "slavedevicetypeid": "45", "meterdivider": 1000}
+    ])
+    offset_df = pd.DataFrame(columns=["deviceid", "slavedeviceid", "offset"])
+    device_df = pd.DataFrame([
+        {"deviceid": "25", "locationid": "29", "name": "Controller 25", "devicetypeid": "56", "meterdivider": 1}
+    ])
+    location_df = pd.DataFrame([{"locationid": "29", "locationname": "029", "buildingtypeid": "1"}])
+    buildingtype_df = pd.DataFrame([{"buildingtypeid": "1", "buildingname": "Kampeerplek"}])
+    devicetype_df = pd.DataFrame([
+        {"devicetypeid": "45", "devid": "4518", "devicename": "CAMPEREWS", "icyname": "ICY4518 Campère wall socket"},
+        {"devicetypeid": "56", "devid": "4942", "devicename": "CAMPCTRL", "icyname": "ICY4942 Campère controller"},
+    ])
+
+    catalog = pulse_tool.build_catalog(log_df, slave_df, offset_df, device_df, location_df, buildingtype_df, devicetype_df)
+    row = catalog.iloc[0]
+
+    assert row["slavedeviceid"] == "14"
+    assert row["meterdivider"] == 1000
+    assert row["raw_reading"] == 10.73
+
+
+def test_build_catalog_uses_device_meterdivider_when_slave_column_exists_but_is_empty():
+    log_df = pd.DataFrame(
+        [
+            {"pulsecounterlogid": 1, "value": 10730, "timestamp": "2026-04-18", "deviceid": "14", "slavedeviceid": None, "channel": None},
+        ]
+    )
+    slave_df = pd.DataFrame([
+        {"slavedeviceid": "99", "deviceid": "88", "locationid": "29", "name": "Other slave", "slavedevicetypeid": "45", "meterdivider": 1000}
+    ])
+    offset_df = pd.DataFrame(columns=["deviceid", "slavedeviceid", "offset"])
+    device_df = pd.DataFrame([
+        {"deviceid": "14", "locationid": "29", "name": "Socket 14", "devicetypeid": "45", "meterdivider": 1000}
+    ])
+    location_df = pd.DataFrame([{"locationid": "29", "locationname": "029", "buildingtypeid": "1"}])
+    buildingtype_df = pd.DataFrame([{"buildingtypeid": "1", "buildingname": "Kampeerplek"}])
+    devicetype_df = pd.DataFrame([
+        {"devicetypeid": "45", "devid": "4518", "devicename": "CAMPEREWS", "icyname": "ICY4518 Campère wall socket"},
+    ])
+
+    catalog = pulse_tool.build_catalog(log_df, slave_df, offset_df, device_df, location_df, buildingtype_df, devicetype_df)
+    row = catalog.iloc[0]
+
+    assert row["deviceid"] == "14"
+    assert row["slavedeviceid"] == ""
+    assert row["meterdivider"] == 1000
+    assert row["raw_reading"] == 10.73
+
+
 def test_prepare_batch_preview_uses_meterdivider_for_new_offset():
     catalog = pd.DataFrame(
         [

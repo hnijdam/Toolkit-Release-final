@@ -702,8 +702,11 @@ def build_catalog(log_df, slave_df, offset_df, device_df=None, location_df=None,
             pd.to_numeric(merged.get("device_offset_value"), errors="coerce")
         )
 
+    slave_meterdivider_series = pd.to_numeric(ensure_series(merged.get("slave_meterdivider", pd.NA), merged.index, pd.NA), errors="coerce")
+    device_meterdivider_series = pd.to_numeric(ensure_series(merged.get("device_meterdivider", pd.NA), merged.index, pd.NA), errors="coerce")
+    existing_meterdivider_series = pd.to_numeric(ensure_series(merged.get("meterdivider", pd.NA), merged.index, pd.NA), errors="coerce")
     merged["meterdivider"] = normalize_meterdivider_series(
-        merged.get("slave_meterdivider", merged.get("device_meterdivider", merged.get("meterdivider", 1))),
+        slave_meterdivider_series.combine_first(device_meterdivider_series).combine_first(existing_meterdivider_series).fillna(1),
         merged.index,
     )
     merged["raw_value"] = pd.to_numeric(ensure_series(merged.get(reading_col, 0), merged.index, 0), errors="coerce").fillna(0)
