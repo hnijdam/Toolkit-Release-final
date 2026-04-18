@@ -454,6 +454,29 @@ def format_table_value(value):
     return value
 
 
+def get_batch_preview_display_df(df):
+    if not isinstance(df, pd.DataFrame):
+        return df
+
+    visible_columns = [
+        "deviceid",
+        "slavedeviceid",
+        "channel",
+        "new_meter_reading",
+        "new_meterdivider",
+        "match_status",
+        "location_label",
+        "meter_type_label",
+        "raw_reading",
+        "current_offset",
+        "effective_reading",
+        "resulting_effective_reading",
+        "new_offset",
+    ]
+    available_columns = [col for col in visible_columns if col in df.columns]
+    return df[available_columns].copy() if available_columns else df.copy()
+
+
 def render_static_table(df, max_height=460):
     if df is None:
         return
@@ -1632,7 +1655,7 @@ def main():
                     f"Klaar: {len(valid_rows)} | Geblokkeerd: {len(blocked_rows)} | Meerdere matches: {len(ambiguous_rows)} | Niet gevonden: {len(missing_rows)} | Ongeldig: {len(invalid_rows)}"
                 )
                 st.caption("De tool schrijft ook een lokale log met redenen van skips, blokkades en opslagacties in je Documenten/ICY-Logs map.")
-                render_static_table(preview, max_height=420)
+                render_static_table(get_batch_preview_display_df(preview), max_height=420)
                 with st.expander("Toon laatste batchlog"):
                     st.text_area("Batchlog", value=read_runtime_log_tail(), height=220, disabled=True)
 

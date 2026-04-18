@@ -369,6 +369,47 @@ def test_prepare_batch_preview_supports_optional_meterdivider_change():
     assert row["resulting_effective_reading"] == 30.0
 
 
+def test_get_batch_preview_display_df_hides_internal_columns():
+    preview = pd.DataFrame(
+        [
+            {
+                "deviceid": "8",
+                "slavedeviceid": "",
+                "channel": "",
+                "new_meter_reading": 4.5,
+                "new_meterdivider": 1000,
+                "match_count": 1,
+                "match_status": "Klaar om op te slaan",
+                "status_detail": "Interne detailuitleg",
+                "location_label": "Camperplek - 015",
+                "raw_reading": 2.103,
+                "raw_value": 2103,
+                "current_meterdivider": 1000,
+                "meterdivider": 1000,
+                "current_offset": 0.897,
+                "effective_reading": 3.0,
+                "resulting_effective_reading": 4.5,
+                "new_offset": 2397,
+                "meter_type_label": "PRM gasmeter",
+                "devicetype_name": "PRM gasmeter",
+                "devicetype_code": "PRMGAS",
+                "meter_variable": "prm_gas_meter",
+                "offset_value_raw": 897,
+            }
+        ]
+    )
+
+    display = pulse_tool.get_batch_preview_display_df(preview)
+
+    assert "raw_value" not in display.columns
+    assert "current_meterdivider" not in display.columns
+    assert "devicetype_code" not in display.columns
+    assert "meter_variable" not in display.columns
+    assert "offset_value_raw" not in display.columns
+    assert "match_status" in display.columns
+    assert "location_label" in display.columns
+
+
 def test_build_catalog_handles_missing_offset_columns_without_crashing():
     log_df = pd.DataFrame(
         [
