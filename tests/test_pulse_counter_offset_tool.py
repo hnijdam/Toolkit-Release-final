@@ -473,6 +473,32 @@ def test_upsert_batch_staging_rows_replaces_duplicate_record():
     assert staged_rows[0]["new_meter_reading"] == 10
 
 
+def test_build_batch_staging_rows_from_df_collects_all_visible_non_mid_rows():
+    df = pd.DataFrame(
+        [
+            {"deviceid": "8", "slavedeviceid": "", "channel": "", "meterdivider": 1000},
+            {"deviceid": "9", "slavedeviceid": "", "channel": "", "meterdivider": 1000},
+            {
+                "deviceid": "2",
+                "slavedeviceid": "10002",
+                "channel": "",
+                "meterdivider": 1000,
+                "meter_type_label": "Campère meter",
+                "devicetype_name": "ICY4850 Campère controller - Campère meter",
+                "devicetype_code": "CAMPSLAVE",
+                "meter_variable": "campere_meter",
+            },
+        ]
+    )
+
+    staged_rows, added_count, updated_count, blocked_count = pulse_tool.build_batch_staging_rows_from_df(df)
+
+    assert len(staged_rows) == 2
+    assert added_count == 2
+    assert updated_count == 0
+    assert blocked_count == 1
+
+
 def test_build_batch_staging_row_rejects_mid_locked_meter():
     row = {
         "deviceid": "2",

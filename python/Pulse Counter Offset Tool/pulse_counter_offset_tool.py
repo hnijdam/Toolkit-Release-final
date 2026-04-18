@@ -521,13 +521,13 @@ def get_batch_staging_editor_df(rows):
 
     for col in desired_columns:
         if col not in df.columns:
-            df[col] = "" if col != "new_meterdivider" else 1
+            df[col] = None if col == "new_meter_reading" else (1 if col == "new_meterdivider" else "")
 
     df = df[desired_columns].copy()
     for col in ["deviceid", "slavedeviceid", "channel"]:
         df[col] = normalize_id_series(df[col])
 
-    df["new_meter_reading"] = df["new_meter_reading"].where(~pd.isna(df["new_meter_reading"]), "")
+    df["new_meter_reading"] = pd.to_numeric(df["new_meter_reading"], errors="coerce")
     df["new_meterdivider"] = pd.to_numeric(df["new_meterdivider"], errors="coerce").fillna(1)
     df["new_meterdivider"] = df["new_meterdivider"].where(df["new_meterdivider"].ne(0), 1).abs()
     return df
@@ -600,6 +600,38 @@ def upsert_batch_staging_rows(existing_rows, new_row):
         updated_rows.append(dict(new_row))
 
     return updated_rows, "updated" if replaced else "added"
+
+
+def build_batch_staging_rows_from_df(df, existing_rows=None):
+    if isinstance(existing_rows, pd.DataFrame):
+        staged_rows = existing_rows.to_dict("records")
+    elif isinstance(existing_rows, list):
+        staged_rows = [dict(row) for row in existing_rows]
+    else:
+        staged_rows = []
+
+    added_count = 0
+    updated_count = 0
+    blocked_count = 0
+
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return staged_rows, added_count, updated_count, blocked_count
+
+    for _, record in df.iterrows():
+        try:
+            staged_row = build_batch_staging_row(record)
+            staged_rows, action = upsert_batch_staging_rows(staged_rows, staged_row)
+            if action == "updated":
+                updated_count += 1
+            else:
+                added_count += 1
+        except ValueError as exc:
+            if MID_PROTECTED_METER_MESSAGE in str(exc):
+                blocked_count += 1
+            else:
+                raise
+
+    return staged_rows, added_count, updated_count, blocked_count
 
 
 def render_static_table(df, max_height=460):
@@ -1690,7 +1722,7 @@ def main():
                 disabled=is_locked,
             )
 
-            preview_col, push_col, save_col, delete_col = st.columns(4)
+            preview_col, push_current_col, push_visible_col, save_col, delete_col = st.columns(5)
             record_payload = {
                 "deviceid": row.get("deviceid", ""),
                 "slavedeviceid": row.get("slavedeviceid", ""),
@@ -1714,22 +1746,40 @@ def main():
                 st.session_state["manual"] = record_payload
 
             push_confirm = st.checkbox(
-                "Bevestig toevoegen aan batchwachtrij (nog niet opslaan)",
+                "Bevestig klaarzetten voor batch (nog niet opslaan)",
                 value=False,
                 key=f"confirm_push_batch_{row.get('deviceid', '')}_{row.get('slavedeviceid', '')}_{row.get('channel', '')}",
-                disabled=is_locked,
+                disabled=False,
             )
-            if push_col.button("Push selectie naar batch", disabled=is_locked or not push_confirm):
+            if push_current_col.button("Push huidig record", disabled=is_locked or not push_confirm):
                 try:
                     staged_row = build_batch_staging_row(record_payload, desired_meter_reading=None, new_meterdivider=new_meterdivider)
                     staged_rows, action = upsert_batch_staging_rows(st.session_state.get("batch_staging", []), staged_row)
                     st.session_state["batch_staging"] = staged_rows
                     write_runtime_log(
-                        f"Selectie toegevoegd aan batchwachtrij ({action}). Nieuwe meterstand moet nog in Batch worden ingevuld; divider={staged_row.get('new_meterdivider', '')}.",
+                        f"Huidig record toegevoegd aan batchwachtrij ({action}). Nieuwe meterstand moet nog in Batch worden ingevuld; divider={staged_row.get('new_meterdivider', '')}.",
                         level="INFO",
                         record=staged_row,
                     )
-                    st.success(f"Selectie staat klaar in Batch ({len(staged_rows)} regel(s) in wachtrij). Vul daar nog de gewenste meterstand in.")
+                    st.success(f"Huidig record staat klaar in Batch ({len(staged_rows)} regel(s) in wachtrij).")
+                except Exception as e:
+                    st.error(e)
+
+            if push_visible_col.button(f"Push alle zichtbare meters ({len(filtered)})", disabled=filtered.empty or not push_confirm):
+                try:
+                    staged_rows, added_count, updated_count, blocked_count = build_batch_staging_rows_from_df(
+                        filtered,
+                        existing_rows=st.session_state.get("batch_staging", []),
+                    )
+                    st.session_state["batch_staging"] = staged_rows
+                    write_runtime_log(
+                        f"Zichtbare selectie naar batchwachtrij gezet: toegevoegd={added_count}, bijgewerkt={updated_count}, geblokkeerd={blocked_count}.",
+                        level="INFO",
+                    )
+                    success_message = f"{added_count + updated_count} zichtbare meter(s) staan klaar in Batch."
+                    if blocked_count:
+                        success_message += f" {blocked_count} MID-meter(s) zijn overgeslagen."
+                    st.success(success_message)
                 except Exception as e:
                     st.error(e)
 
@@ -1782,6 +1832,14 @@ def main():
                 hide_index=True,
                 use_container_width=True,
                 disabled=["deviceid", "slavedeviceid", "channel"],
+                num_rows="dynamic",
+                column_config={
+                    "deviceid": st.column_config.TextColumn("DeviceID"),
+                    "slavedeviceid": st.column_config.TextColumn("SlaveDeviceID"),
+                    "channel": st.column_config.TextColumn("Channel"),
+                    "new_meter_reading": st.column_config.NumberColumn("Nieuwe meterstand", min_value=0.0, step=1.0, format="%g"),
+                    "new_meterdivider": st.column_config.NumberColumn("Nieuwe meterdivider", min_value=1.0, step=1.0, format="%g"),
+                },
                 key="batch_staging_editor",
             )
             st.session_state["batch_staging"] = get_batch_staging_editor_df(edited_staged_df).to_dict("records")
