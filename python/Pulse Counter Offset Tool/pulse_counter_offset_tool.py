@@ -509,6 +509,30 @@ def get_batch_preview_display_df(df):
     return df[available_columns].copy() if available_columns else df.copy()
 
 
+def get_batch_staging_editor_df(rows):
+    desired_columns = ["deviceid", "slavedeviceid", "channel", "new_meter_reading", "new_meterdivider"]
+
+    if isinstance(rows, pd.DataFrame):
+        df = rows.copy()
+    elif isinstance(rows, list):
+        df = pd.DataFrame(rows)
+    else:
+        df = pd.DataFrame(columns=desired_columns)
+
+    for col in desired_columns:
+        if col not in df.columns:
+            df[col] = "" if col != "new_meterdivider" else 1
+
+    df = df[desired_columns].copy()
+    for col in ["deviceid", "slavedeviceid", "channel"]:
+        df[col] = normalize_id_series(df[col])
+
+    df["new_meter_reading"] = df["new_meter_reading"].where(~pd.isna(df["new_meter_reading"]), "")
+    df["new_meterdivider"] = pd.to_numeric(df["new_meterdivider"], errors="coerce").fillna(1)
+    df["new_meterdivider"] = df["new_meterdivider"].where(df["new_meterdivider"].ne(0), 1).abs()
+    return df
+
+
 def normalize_id_value(value):
     series = normalize_id_series(pd.Series([value]))
     return str(series.iloc[0]) if not series.empty else ""
@@ -538,14 +562,15 @@ def build_batch_staging_row(record, desired_meter_reading=None, new_meterdivider
     if divider_value is None or divider_value == "" or pd.isna(divider_value):
         divider_value = record.get("new_meterdivider", record.get("meterdivider", record.get("current_meterdivider", 1)))
 
-    if desired_meter_reading is None or pd.isna(desired_meter_reading):
-        desired_meter_reading = record.get("new_meter_reading", record.get("effective_reading", record.get("raw_reading", "")))
+    desired_value = desired_meter_reading
+    if desired_value is None or (isinstance(desired_value, str) and desired_value.strip() == "") or pd.isna(desired_value):
+        desired_value = ""
 
     staged_row = {
         "deviceid": device_id,
         "slavedeviceid": slave_id,
         "channel": channel,
-        "new_meter_reading": to_plain_value(desired_meter_reading),
+        "new_meter_reading": to_plain_value(desired_value) if desired_value != "" else "",
         "new_meterdivider": to_plain_value(get_normalized_meterdivider(divider_value)),
     }
     return staged_row
@@ -1696,15 +1721,15 @@ def main():
             )
             if push_col.button("Push selectie naar batch", disabled=is_locked or not push_confirm):
                 try:
-                    staged_row = build_batch_staging_row(record_payload, desired_meter_reading=desired, new_meterdivider=new_meterdivider)
+                    staged_row = build_batch_staging_row(record_payload, desired_meter_reading=None, new_meterdivider=new_meterdivider)
                     staged_rows, action = upsert_batch_staging_rows(st.session_state.get("batch_staging", []), staged_row)
                     st.session_state["batch_staging"] = staged_rows
                     write_runtime_log(
-                        f"Selectie toegevoegd aan batchwachtrij ({action}). Doelstand={staged_row.get('new_meter_reading', '')}, divider={staged_row.get('new_meterdivider', '')}.",
+                        f"Selectie toegevoegd aan batchwachtrij ({action}). Nieuwe meterstand moet nog in Batch worden ingevuld; divider={staged_row.get('new_meterdivider', '')}.",
                         level="INFO",
                         record=staged_row,
                     )
-                    st.success(f"Selectie staat klaar in Batch ({len(staged_rows)} regel(s) in wachtrij).")
+                    st.success(f"Selectie staat klaar in Batch ({len(staged_rows)} regel(s) in wachtrij). Vul daar nog de gewenste meterstand in.")
                 except Exception as e:
                     st.error(e)
 
@@ -1747,15 +1772,23 @@ def main():
         st.write("Upload een Excel-bestand met minimaal een nieuwe meterstand. Als SlavedeviceID is ingevuld, wordt die altijd gebruikt. DeviceID wordt alleen gebruikt voor rechtstreekse meters zonder SlavedeviceID.")
 
         staged_rows = st.session_state.get("batch_staging", [])
+        edited_staged_df = None
         if staged_rows:
             st.markdown("#### Batchwachtrij vanuit selectie")
-            st.caption("Deze wachtrij is nog niet opgeslagen in de database. Dezelfde meter wordt veilig bijgewerkt in plaats van dubbel toegevoegd.")
-            staged_df = pd.DataFrame(staged_rows)
-            render_static_table(staged_df, max_height=220)
+            st.caption("Deze wachtrij is nog niet opgeslagen in de database. Pas hier de nieuwe meterstand en eventueel de divider aan; pas na de bevestiging onderaan wordt er echt opgeslagen.")
+            staged_df = get_batch_staging_editor_df(staged_rows)
+            edited_staged_df = st.data_editor(
+                staged_df,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["deviceid", "slavedeviceid", "channel"],
+                key="batch_staging_editor",
+            )
+            st.session_state["batch_staging"] = get_batch_staging_editor_df(edited_staged_df).to_dict("records")
 
             queue_col1, queue_col2 = st.columns([2, 1])
             use_staged_queue = queue_col1.checkbox(
-                f"Gebruik batchwachtrij ({len(staged_rows)} regel(s))",
+                f"Gebruik batchwachtrij ({len(st.session_state.get('batch_staging', []))} regel(s))",
                 value=True,
                 key="use_staged_queue",
             )
@@ -1798,8 +1831,8 @@ def main():
             else:
                 source_df = pd.read_excel(file)
 
-        if use_staged_queue and staged_rows:
-            source_df = pd.DataFrame(staged_rows)
+        if use_staged_queue and st.session_state.get("batch_staging"):
+            source_df = get_batch_staging_editor_df(edited_staged_df if edited_staged_df is not None else st.session_state.get("batch_staging", []))
 
         if source_df is not None:
             try:

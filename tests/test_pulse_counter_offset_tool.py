@@ -444,6 +444,22 @@ def test_build_batch_staging_row_keeps_only_batch_fields_and_values():
     assert "meter_type_label" not in staged
 
 
+def test_build_batch_staging_row_defaults_target_reading_to_blank_for_later_editing():
+    row = {
+        "deviceid": "8",
+        "slavedeviceid": "",
+        "channel": "",
+        "meterdivider": 1000,
+        "effective_reading": 2.162,
+    }
+
+    staged = pulse_tool.build_batch_staging_row(row)
+
+    assert staged["deviceid"] == "8"
+    assert staged["new_meter_reading"] == ""
+    assert staged["new_meterdivider"] == 1000
+
+
 def test_upsert_batch_staging_rows_replaces_duplicate_record():
     existing_rows = [
         {"deviceid": "8", "slavedeviceid": "", "channel": "", "new_meter_reading": 5, "new_meterdivider": 1000}
