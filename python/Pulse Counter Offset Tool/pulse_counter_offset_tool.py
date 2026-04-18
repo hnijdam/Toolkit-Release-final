@@ -1680,6 +1680,11 @@ def main():
             st.caption(
                 f"Huidig record → Locatie: {current_location} | DeviceID: {row.get('deviceid', '-') or '-'} | Device naam: {row.get('device_name', '-') or '-'} | SlaveDeviceID: {row.get('slavedeviceid', '-') or '-'} | Meter Type: {row.get('devicetype_name', '-') or '-'}"
             )
+            active_location_scope = st.session_state.get("selected_location", "Alle locaties")
+            active_mid_scope = st.session_state.get("mid_filter", "Alle meters")
+            st.caption(
+                f"Bulkselectie gebruikt de volledige huidige filterset: {active_location_scope} • {active_mid_scope} • {len(filtered)} zichtbare meter(s)."
+            )
 
             is_locked = bool(row.get("offset_edit_blocked", False)) or is_offset_edit_blocked(row)
             if is_locked:
@@ -1765,7 +1770,7 @@ def main():
                 except Exception as e:
                     st.error(e)
 
-            if push_visible_col.button(f"Push alle zichtbare meters ({len(filtered)})", disabled=filtered.empty or not push_confirm):
+            if push_visible_col.button(f"Push gefilterde selectie ({len(filtered)})", disabled=filtered.empty or not push_confirm, help="Gebruikt alle meters die nu zichtbaar zijn op basis van locatie-, zoek- en MID-filter."):
                 try:
                     staged_rows, added_count, updated_count, blocked_count = build_batch_staging_rows_from_df(
                         filtered,
