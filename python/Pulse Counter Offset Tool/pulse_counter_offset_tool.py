@@ -206,7 +206,7 @@ def restore_persisted_state():
             if key == "user_initials":
                 parsed_value = str(parsed_value).upper()
 
-        if key not in st.session_state or st.session_state.get(key) in {"", None}:
+        if key not in st.session_state:
             st.session_state[key] = parsed_value
 
     db_password_value = st.session_state.get("db_password", "") or cfg("DB_PASSWORD", "")

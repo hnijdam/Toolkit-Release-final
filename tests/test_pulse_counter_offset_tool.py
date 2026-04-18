@@ -114,6 +114,20 @@ def test_restore_persisted_state_prefills_credentials_and_initials_from_env(monk
     assert fake_st.session_state["user_initials"] == "HN"
 
 
+def test_restore_persisted_state_does_not_reapply_cleared_search_from_query(monkeypatch):
+    fake_st = fake_streamlit(
+        session_state={"search_text": "", "selected_location": "Alle locaties"},
+        query_params={"search_text": "Kampeerplek-001", "selected_location": "Kampeerplek-001"},
+    )
+
+    monkeypatch.setattr(pulse_tool, "st", fake_st)
+
+    pulse_tool.restore_persisted_state()
+
+    assert fake_st.session_state["search_text"] == ""
+    assert fake_st.session_state["selected_location"] == "Alle locaties"
+
+
 def test_build_catalog_prefers_slave_offset_above_device_offset():
     log_df = pd.DataFrame(
         [
