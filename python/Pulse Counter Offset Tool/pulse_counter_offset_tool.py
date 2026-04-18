@@ -329,11 +329,25 @@ def to_plain_value(value):
     return value
 
 
+def clean_display_text(value):
+    if value is None or pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"", "nan", "none", "<na>", "null"}:
+        return ""
+    if text in {"0", "0.0", "0.00", "0.000"}:
+        return ""
+    return text
+
+
+def normalize_display_text_series(value, index):
+    series = ensure_series(value, index, "")
+    return series.map(clean_display_text)
+
+
 def get_meter_type_variables(devicetypeid="", devicename="", icyname="", metertype=""):
     def clean_text(value):
-        if pd.isna(value):
-            return ""
-        return str(value).strip()
+        return clean_display_text(value)
 
     devicetypeid = normalize_id_series([devicetypeid]).iloc[0]
     devicename = clean_text(devicename).upper()
@@ -697,31 +711,25 @@ def build_catalog(log_df, slave_df, offset_df, device_df=None, location_df=None,
     location_name = merged.get("locationname", pd.Series([""] * len(merged), index=merged.index))
     if not isinstance(location_name, pd.Series):
         location_name = pd.Series([location_name] * len(merged), index=merged.index)
-    merged["locationname"] = location_name.fillna("").astype(str).str.strip()
+    merged["locationname"] = normalize_display_text_series(location_name, merged.index)
 
     building_name = merged.get("buildingname", pd.Series([""] * len(merged), index=merged.index))
     if not isinstance(building_name, pd.Series):
         building_name = pd.Series([building_name] * len(merged), index=merged.index)
-    merged["buildingname"] = building_name.fillna("").astype(str).str.strip()
+    merged["buildingname"] = normalize_display_text_series(building_name, merged.index)
     merged["location_label"] = (merged["buildingname"] + " - " + merged["locationname"]).str.strip(" -")
     merged.loc[merged["location_label"] == "", "location_label"] = merged["locationname"]
 
-    device_name_series = merged.get("device_name", pd.Series([""] * len(merged), index=merged.index))
-    if not isinstance(device_name_series, pd.Series):
-        device_name_series = pd.Series([device_name_series] * len(merged), index=merged.index)
-    device_name_series = device_name_series.fillna("").astype(str).str.strip()
+    device_name_series = normalize_display_text_series(merged.get("device_name", ""), merged.index)
 
-    device_type_icy_series = merged.get("device_type_icyname", pd.Series([""] * len(merged), index=merged.index))
-    if not isinstance(device_type_icy_series, pd.Series):
-        device_type_icy_series = pd.Series([device_type_icy_series] * len(merged), index=merged.index)
-    device_type_icy_series = device_type_icy_series.fillna("").astype(str).str.strip()
+    device_type_icy_series = normalize_display_text_series(merged.get("device_type_icyname", ""), merged.index)
 
     merged["device_name"] = device_name_series.where(device_name_series.ne(""), device_type_icy_series)
 
-    fallback_name = merged.get("slave_name", merged.get("device_name", merged.get("name", "")))
-    if not isinstance(fallback_name, pd.Series):
-        fallback_name = pd.Series([fallback_name] * len(merged), index=merged.index)
-    fallback_name = fallback_name.fillna("").astype(str).str.strip()
+    fallback_name = normalize_display_text_series(
+        merged.get("slave_name", merged.get("device_name", merged.get("name", ""))),
+        merged.index,
+    )
 
     merged.loc[merged["location_label"] == "", "location_label"] = fallback_name
     merged.loc[merged["location_label"] == "", "location_label"] = "Onbekende locatie"

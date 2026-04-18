@@ -422,6 +422,32 @@ def test_build_catalog_never_shows_nan_for_unmapped_direct_devicetype():
     assert row["meter_type_label"] == "ICY4518 Campère wall socket"
 
 
+def test_build_catalog_does_not_show_zero_as_device_name():
+    log_df = pd.DataFrame(
+        [
+            {"pulsecounterlogid": 1, "value": 1048, "timestamp": "2026-04-16", "deviceid": "348", "slavedeviceid": "704", "channel": None},
+        ]
+    )
+    slave_df = pd.DataFrame([
+        {"slavedeviceid": "704", "deviceid": "348", "locationid": "14", "name": None, "slavedevicetypeid": "60"}
+    ])
+    offset_df = pd.DataFrame(columns=["deviceid", "slavedeviceid", "offset"])
+    device_df = pd.DataFrame([{"deviceid": "348", "locationid": "14", "name": 0, "devicetypeid": "60"}])
+    location_df = pd.DataFrame([{"locationid": "14", "locationname": "14", "buildingtypeid": "7"}])
+    buildingtype_df = pd.DataFrame([{"buildingtypeid": "7", "buildingname": "Villa"}])
+    devicetype_df = pd.DataFrame(
+        [
+            {"devicetypeid": "60", "devid": "5247", "devicename": "PRMKWH", "icyname": "ICY5247 prm kWh"},
+        ]
+    )
+
+    catalog = pulse_tool.build_catalog(log_df, slave_df, offset_df, device_df, location_df, buildingtype_df, devicetype_df)
+    row = catalog.iloc[0]
+
+    assert row["device_name"] != "0"
+    assert row["device_name"] == "ICY5247 prm kWh"
+
+
 def test_build_catalog_hides_orphan_historical_logs_without_active_links():
     log_df = pd.DataFrame(
         [
