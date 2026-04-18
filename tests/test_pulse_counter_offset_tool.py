@@ -96,6 +96,23 @@ def test_write_runtime_log_records_message_and_record_reference(tmp_path, monkey
     assert "deviceid=25" in contents
 
 
+def test_read_runtime_log_tail_returns_only_latest_batch_section(tmp_path, monkeypatch):
+    log_path = tmp_path / "pulse_counter_offset_tool.log"
+    monkeypatch.setattr(pulse_tool, "RUNTIME_LOG_DIR", tmp_path)
+    monkeypatch.setattr(pulse_tool, "RUNTIME_LOG_PATH", log_path)
+
+    log_path.write_text(
+        "=== BATCH START 2026-04-16 12:00:00 ===\nold line\n=== BATCH START 2026-04-18 15:01:58 ===\nnew line 1\nnew line 2\n",
+        encoding="utf-8",
+    )
+
+    tail = pulse_tool.read_runtime_log_tail()
+
+    assert "new line 1" in tail
+    assert "new line 2" in tail
+    assert "old line" not in tail
+
+
 def test_format_table_value_trims_only_unnecessary_decimals():
     assert pulse_tool.format_table_value(1000.0) == "1000"
     assert pulse_tool.format_table_value(294.0) == "294"

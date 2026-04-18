@@ -24,7 +24,8 @@ APP_FILE = Path(__file__).resolve()
 APP_DIR = APP_FILE.parent
 LOGO_PATH = APP_DIR / "logo_icy.svg"
 SCRIPTS_ROOT = APP_FILE.parents[3] if len(APP_FILE.parents) >= 4 else APP_DIR
-RUNTIME_LOG_DIR = Path.home() / "Documents" / "ICY-Logs"
+DEFAULT_RUNTIME_LOG_DIR = Path.home() / "Documents" / "ICY-Logs"
+RUNTIME_LOG_DIR = DEFAULT_RUNTIME_LOG_DIR
 RUNTIME_LOG_PATH = RUNTIME_LOG_DIR / "pulse_counter_offset_tool.log"
 
 ENV_PATHS = [
@@ -340,13 +341,32 @@ def build_record_reference(record):
     return ", ".join(parts) if parts else "onbekend record"
 
 
+def get_runtime_log_path():
+    runtime_log_path = Path(RUNTIME_LOG_PATH)
+    if os.getenv("PYTEST_CURRENT_TEST") and runtime_log_path == (DEFAULT_RUNTIME_LOG_DIR / "pulse_counter_offset_tool.log"):
+        runtime_log_path = APP_DIR / ".pytest-logs" / "pulse_counter_offset_tool.log"
+    return runtime_log_path
+
+
+def start_batch_log(label="Batch opslaan"):
+    try:
+        runtime_log_path = get_runtime_log_path()
+        runtime_log_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with runtime_log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"=== BATCH START {timestamp} | {label} ===\n")
+    except Exception:
+        pass
+
+
 def write_runtime_log(message, level="INFO", record=None):
     try:
-        RUNTIME_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        runtime_log_path = get_runtime_log_path()
+        runtime_log_path.parent.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         record_ref = build_record_reference(record)
         line = f"[{timestamp}] [{level}] {message} | {record_ref}\n"
-        with RUNTIME_LOG_PATH.open("a", encoding="utf-8") as handle:
+        with runtime_log_path.open("a", encoding="utf-8") as handle:
             handle.write(line)
     except Exception:
         pass
@@ -354,9 +374,15 @@ def write_runtime_log(message, level="INFO", record=None):
 
 def read_runtime_log_tail(max_lines=200):
     try:
-        if not RUNTIME_LOG_PATH.exists():
+        runtime_log_path = get_runtime_log_path()
+        if not runtime_log_path.exists():
             return "Nog geen logregels beschikbaar."
-        lines = RUNTIME_LOG_PATH.read_text(encoding="utf-8").splitlines()
+        lines = runtime_log_path.read_text(encoding="utf-8").splitlines()
+        if not lines:
+            return "Nog geen logregels beschikbaar."
+        batch_start_indexes = [index for index, line in enumerate(lines) if line.startswith("=== BATCH START ")]
+        if batch_start_indexes:
+            lines = lines[batch_start_indexes[-1]:]
         return "\n".join(lines[-max_lines:]) if lines else "Nog geen logregels beschikbaar."
     except Exception:
         return "Log kon niet worden gelezen."
@@ -988,7 +1014,11 @@ def save_offset(df):
                     """,
                     (device_id, slave_id, channel, new_offset, comment_value, existing[0])
                 )
-                write_runtime_log(f"Offset bijgewerkt naar raw waarde {new_offset}.", level="INFO", record=r)
+                write_runtime_log(
+                    f"Offset bijgewerkt: huidig={r.get('effective_reading', '')}, doel={r.get('new_meter_reading', '')}, divider={r.get('new_meterdivider', current_meterdivider)}, raw_offset={new_offset}, resultaat={r.get('resulting_effective_reading', '')}.",
+                    level="INFO",
+                    record=r,
+                )
             else:
                 cur.execute(
                     f"""
@@ -997,7 +1027,11 @@ def save_offset(df):
                     """,
                     (device_id, slave_id, channel, new_offset, comment_value)
                 )
-                write_runtime_log(f"Nieuwe offset opgeslagen met raw waarde {new_offset}.", level="INFO", record=r)
+                write_runtime_log(
+                    f"Nieuwe offset opgeslagen: huidig={r.get('effective_reading', '')}, doel={r.get('new_meter_reading', '')}, divider={r.get('new_meterdivider', current_meterdivider)}, raw_offset={new_offset}, resultaat={r.get('resulting_effective_reading', '')}.",
+                    level="INFO",
+                    record=r,
+                )
 
         c.commit()
     finally:
@@ -1678,6 +1712,7 @@ def main():
                     st.warning("Controleer de preview zorgvuldig. Batch opslaan kan in één keer veel offsets wijzigen.")
 
                 if st.button("Batch opslaan", disabled=valid_rows.empty or not batch_confirm):
+                    start_batch_log(f"{len(valid_rows)} geldige regel(s)")
                     for _, r in preview.iterrows():
                         status = str(r.get("match_status", "")).strip()
                         detail = str(r.get("status_detail", "")).strip()
