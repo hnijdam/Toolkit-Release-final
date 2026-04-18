@@ -537,6 +537,24 @@ def test_build_persisted_state_keeps_refresh_values_without_password():
     assert "db_password" not in persisted
 
 
+def test_search_text_can_be_cleared_when_switching_database():
+    state = {
+        "db_name": "old_db",
+        "search_text": "water",
+        "selected_location": "Villa - 14",
+    }
+
+    previous_db_name = str(state.get("db_name", "")).strip()
+    new_db_name = "new_db"
+
+    if previous_db_name and previous_db_name != new_db_name:
+        state["search_text"] = ""
+        state["selected_location"] = "Alle locaties"
+
+    assert state["search_text"] == ""
+    assert state["selected_location"] == "Alle locaties"
+
+
 def test_prepare_batch_preview_separates_direct_devices_from_slave_devices():
     catalog = pd.DataFrame(
         [

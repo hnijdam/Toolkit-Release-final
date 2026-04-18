@@ -1177,9 +1177,12 @@ def main():
             submitted = st.form_submit_button("Database laden")
 
         if submitted:
+            previous_db_name = str(st.session_state.get("db_name", "")).strip()
+            new_db_name = db_name_input.strip()
+
             st.session_state["db_host_override"] = selected_host
             st.session_state["db_host_manual"] = manual_host_input.strip()
-            st.session_state["db_name"] = db_name_input.strip()
+            st.session_state["db_name"] = new_db_name
             st.session_state["db_user"] = db_user_input.strip()
             st.session_state["db_password"] = db_password_input
             st.session_state["user_initials"] = initials_input.strip().upper()
@@ -1189,6 +1192,11 @@ def main():
             st.session_state["db_ready"] = True
             st.session_state["manual"] = None
             st.session_state["current_record_index"] = 0
+
+            if previous_db_name and previous_db_name != new_db_name:
+                st.session_state["search_text"] = ""
+                st.session_state["selected_location"] = "Alle locaties"
+
             sync_persisted_state()
 
     if not st.session_state.get("db_ready"):
