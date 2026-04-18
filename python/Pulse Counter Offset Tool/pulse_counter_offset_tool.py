@@ -222,6 +222,8 @@ def restore_persisted_state():
 
     if "manual" not in st.session_state:
         st.session_state["manual"] = None
+    if "batch_staging" not in st.session_state:
+        st.session_state["batch_staging"] = []
 
 
 def sync_persisted_state():
@@ -505,6 +507,74 @@ def get_batch_preview_display_df(df):
     ]
     available_columns = [col for col in visible_columns if col in df.columns]
     return df[available_columns].copy() if available_columns else df.copy()
+
+
+def normalize_id_value(value):
+    series = normalize_id_series(pd.Series([value]))
+    return str(series.iloc[0]) if not series.empty else ""
+
+
+def build_batch_staging_key(record):
+    if record is None:
+        return ("", "", "")
+    return (
+        normalize_id_value(record.get("deviceid", "")),
+        normalize_id_value(record.get("slavedeviceid", "")),
+        normalize_id_value(record.get("channel", "")),
+    )
+
+
+def build_batch_staging_row(record, desired_meter_reading=None, new_meterdivider=None):
+    if record is None:
+        raise ValueError("Geen record geselecteerd om toe te voegen aan de batchwachtrij.")
+    if is_offset_edit_blocked(record):
+        raise ValueError(MID_PROTECTED_METER_MESSAGE)
+
+    device_id, slave_id, channel = build_batch_staging_key(record)
+    if not device_id and not slave_id:
+        raise ValueError("Het geselecteerde record mist een DeviceID en SlavedeviceID.")
+
+    divider_value = new_meterdivider
+    if divider_value is None or divider_value == "" or pd.isna(divider_value):
+        divider_value = record.get("new_meterdivider", record.get("meterdivider", record.get("current_meterdivider", 1)))
+
+    if desired_meter_reading is None or pd.isna(desired_meter_reading):
+        desired_meter_reading = record.get("new_meter_reading", record.get("effective_reading", record.get("raw_reading", "")))
+
+    staged_row = {
+        "deviceid": device_id,
+        "slavedeviceid": slave_id,
+        "channel": channel,
+        "new_meter_reading": to_plain_value(desired_meter_reading),
+        "new_meterdivider": to_plain_value(get_normalized_meterdivider(divider_value)),
+    }
+    return staged_row
+
+
+def upsert_batch_staging_rows(existing_rows, new_row):
+    rows = []
+    if isinstance(existing_rows, pd.DataFrame):
+        rows = existing_rows.to_dict("records")
+    elif isinstance(existing_rows, list):
+        rows = [dict(row) for row in existing_rows]
+
+    target_key = build_batch_staging_key(new_row)
+    updated_rows = []
+    replaced = False
+
+    for row in rows:
+        row_key = build_batch_staging_key(row)
+        if row_key == target_key:
+            if not replaced:
+                updated_rows.append(dict(new_row))
+                replaced = True
+        else:
+            updated_rows.append(dict(row))
+
+    if not replaced:
+        updated_rows.append(dict(new_row))
+
+    return updated_rows, "updated" if replaced else "added"
 
 
 def render_static_table(df, max_height=460):
@@ -1595,7 +1665,7 @@ def main():
                 disabled=is_locked,
             )
 
-            preview_col, save_col, delete_col = st.columns(3)
+            preview_col, push_col, save_col, delete_col = st.columns(4)
             record_payload = {
                 "deviceid": row.get("deviceid", ""),
                 "slavedeviceid": row.get("slavedeviceid", ""),
@@ -1617,6 +1687,26 @@ def main():
 
             if preview_col.button("Preview", disabled=is_locked):
                 st.session_state["manual"] = record_payload
+
+            push_confirm = st.checkbox(
+                "Bevestig toevoegen aan batchwachtrij (nog niet opslaan)",
+                value=False,
+                key=f"confirm_push_batch_{row.get('deviceid', '')}_{row.get('slavedeviceid', '')}_{row.get('channel', '')}",
+                disabled=is_locked,
+            )
+            if push_col.button("Push selectie naar batch", disabled=is_locked or not push_confirm):
+                try:
+                    staged_row = build_batch_staging_row(record_payload, desired_meter_reading=desired, new_meterdivider=new_meterdivider)
+                    staged_rows, action = upsert_batch_staging_rows(st.session_state.get("batch_staging", []), staged_row)
+                    st.session_state["batch_staging"] = staged_rows
+                    write_runtime_log(
+                        f"Selectie toegevoegd aan batchwachtrij ({action}). Doelstand={staged_row.get('new_meter_reading', '')}, divider={staged_row.get('new_meterdivider', '')}.",
+                        level="INFO",
+                        record=staged_row,
+                    )
+                    st.success(f"Selectie staat klaar in Batch ({len(staged_rows)} regel(s) in wachtrij).")
+                except Exception as e:
+                    st.error(e)
 
             if st.session_state["manual"]:
                 st.success("Preview klaar")
@@ -1656,6 +1746,32 @@ def main():
         st.subheader("Batch import")
         st.write("Upload een Excel-bestand met minimaal een nieuwe meterstand. Als SlavedeviceID is ingevuld, wordt die altijd gebruikt. DeviceID wordt alleen gebruikt voor rechtstreekse meters zonder SlavedeviceID.")
 
+        staged_rows = st.session_state.get("batch_staging", [])
+        if staged_rows:
+            st.markdown("#### Batchwachtrij vanuit selectie")
+            st.caption("Deze wachtrij is nog niet opgeslagen in de database. Dezelfde meter wordt veilig bijgewerkt in plaats van dubbel toegevoegd.")
+            staged_df = pd.DataFrame(staged_rows)
+            render_static_table(staged_df, max_height=220)
+
+            queue_col1, queue_col2 = st.columns([2, 1])
+            use_staged_queue = queue_col1.checkbox(
+                f"Gebruik batchwachtrij ({len(staged_rows)} regel(s))",
+                value=True,
+                key="use_staged_queue",
+            )
+            clear_queue_confirm = queue_col2.checkbox(
+                "Bevestig legen",
+                value=False,
+                key="clear_batch_queue_confirm",
+            )
+            if queue_col2.button("Wachtrij legen", disabled=not clear_queue_confirm):
+                st.session_state["batch_staging"] = []
+                write_runtime_log("Batchwachtrij handmatig geleegd.", level="INFO")
+                st.success("Batchwachtrij geleegd.")
+                st.rerun()
+        else:
+            use_staged_queue = False
+
         template_df = pd.DataFrame([
             {"slavedeviceid": "50", "deviceid": "25", "new_meter_reading": 1500, "new_meterdivider": 100},
             {"slavedeviceid": "11174", "deviceid": "", "new_meter_reading": 3200, "new_meterdivider": ""},
@@ -1675,14 +1791,19 @@ def main():
 
         file = st.file_uploader("Excel of CSV upload", type=["xlsx", "csv"])
 
+        source_df = None
         if file:
             if file.name.lower().endswith(".csv"):
-                df = pd.read_csv(file)
+                source_df = pd.read_csv(file)
             else:
-                df = pd.read_excel(file)
+                source_df = pd.read_excel(file)
 
+        if use_staged_queue and staged_rows:
+            source_df = pd.DataFrame(staged_rows)
+
+        if source_df is not None:
             try:
-                preview = prepare_batch_preview(df, catalog)
+                preview = prepare_batch_preview(source_df, catalog)
                 valid_rows = preview[preview["match_status"] == "Klaar om op te slaan"].copy()
                 blocked_rows = preview[preview["match_status"].str.contains("Geblokkeerd", na=False)].copy()
                 ambiguous_rows = preview[preview["match_status"].str.contains("Meerdere matches", na=False)].copy()

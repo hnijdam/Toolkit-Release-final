@@ -427,6 +427,53 @@ def test_get_batch_preview_display_df_hides_internal_columns():
     assert "location_label" in display.columns
 
 
+def test_build_batch_staging_row_keeps_only_batch_fields_and_values():
+    row = {
+        "deviceid": "8",
+        "slavedeviceid": "",
+        "channel": "",
+        "meterdivider": 1000,
+        "meter_type_label": "PRM gasmeter",
+    }
+
+    staged = pulse_tool.build_batch_staging_row(row, desired_meter_reading=10, new_meterdivider=1000)
+
+    assert staged["deviceid"] == "8"
+    assert staged["new_meter_reading"] == 10
+    assert staged["new_meterdivider"] == 1000
+    assert "meter_type_label" not in staged
+
+
+def test_upsert_batch_staging_rows_replaces_duplicate_record():
+    existing_rows = [
+        {"deviceid": "8", "slavedeviceid": "", "channel": "", "new_meter_reading": 5, "new_meterdivider": 1000}
+    ]
+    new_row = {"deviceid": "8", "slavedeviceid": "", "channel": "", "new_meter_reading": 10, "new_meterdivider": 1000}
+
+    staged_rows, action = pulse_tool.upsert_batch_staging_rows(existing_rows, new_row)
+
+    assert action == "updated"
+    assert len(staged_rows) == 1
+    assert staged_rows[0]["new_meter_reading"] == 10
+
+
+def test_build_batch_staging_row_rejects_mid_locked_meter():
+    row = {
+        "deviceid": "2",
+        "slavedeviceid": "10002",
+        "meter_type_label": "Campère meter",
+        "devicetype_name": "ICY4850 Campère controller - Campère meter",
+        "devicetype_code": "CAMPSLAVE",
+        "meter_variable": "campere_meter",
+    }
+
+    try:
+        pulse_tool.build_batch_staging_row(row, desired_meter_reading=10, new_meterdivider=1000)
+        assert False, "Expected MID-locked meter to be blocked from batch staging"
+    except ValueError as exc:
+        assert "MID" in str(exc)
+
+
 def test_build_catalog_handles_missing_offset_columns_without_crashing():
     log_df = pd.DataFrame(
         [
