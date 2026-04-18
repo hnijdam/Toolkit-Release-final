@@ -85,6 +85,11 @@ def test_format_table_value_trims_only_unnecessary_decimals():
     assert pulse_tool.format_table_value(24.256) == "24.256"
 
 
+def test_normalize_searchable_text_supports_location_search():
+    assert pulse_tool.normalize_searchable_text("Villa - 14") == "villa 14"
+    assert pulse_tool.normalize_searchable_text("Aardappelpand -- 023") == "aardappelpand 023"
+
+
 def test_restore_persisted_state_prefills_credentials_and_initials_from_env(monkeypatch):
     fake_st = fake_streamlit(
         initials="",
@@ -477,6 +482,32 @@ def test_build_catalog_hides_orphan_historical_logs_without_active_links():
     assert len(catalog) == 1
     assert catalog.iloc[0]["deviceid"] == "9"
     assert catalog.iloc[0]["slavedeviceid"] == ""
+
+
+def test_build_catalog_search_text_contains_normalized_location_name():
+    log_df = pd.DataFrame(
+        [
+            {"pulsecounterlogid": 1, "value": 100, "timestamp": "2026-04-16", "deviceid": "9", "slavedeviceid": None, "channel": None},
+        ]
+    )
+    slave_df = pd.DataFrame(columns=["slavedeviceid", "deviceid", "locationid", "name", "slavedevicetypeid"])
+    offset_df = pd.DataFrame(columns=["deviceid", "slavedeviceid", "offset"])
+    device_df = pd.DataFrame([
+        {"deviceid": "9", "locationid": "16", "name": "Villa meter", "devicetypeid": "45"}
+    ])
+    location_df = pd.DataFrame([
+        {"locationid": "16", "locationname": "14", "buildingtypeid": "2"}
+    ])
+    buildingtype_df = pd.DataFrame([
+        {"buildingtypeid": "2", "buildingname": "Villa"}
+    ])
+    devicetype_df = pd.DataFrame([
+        {"devicetypeid": "45", "devid": "4518", "devicename": "CAMPEREWS", "icyname": "ICY4518 Campère wall socket"}
+    ])
+
+    catalog = pulse_tool.build_catalog(log_df, slave_df, offset_df, device_df, location_df, buildingtype_df, devicetype_df)
+
+    assert "villa 14" in str(catalog.iloc[0]["search_text"])
 
 
 def test_build_persisted_state_keeps_refresh_values_without_password():

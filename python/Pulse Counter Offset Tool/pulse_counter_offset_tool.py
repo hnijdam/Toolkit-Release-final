@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime
 from io import BytesIO
 from numbers import Number
@@ -343,6 +344,18 @@ def clean_display_text(value):
 def normalize_display_text_series(value, index):
     series = ensure_series(value, index, "")
     return series.map(clean_display_text)
+
+
+def normalize_searchable_text(value):
+    text = clean_display_text(value).lower()
+    text = re.sub(r"[-_/|]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def normalize_searchable_text_series(value, index):
+    series = ensure_series(value, index, "")
+    return series.map(normalize_searchable_text)
 
 
 def get_meter_type_variables(devicetypeid="", devicename="", icyname="", metertype=""):
@@ -780,16 +793,19 @@ def build_catalog(log_df, slave_df, offset_df, device_df=None, location_df=None,
     merged.loc[merged["display_name"] == "", "display_name"] = merged["deviceid"]
 
     merged["search_text"] = (
-        get_text_series(merged, "display_name") + " " +
-        get_text_series(merged, "deviceid") + " " +
-        get_text_series(merged, slave_key) + " " +
-        get_text_series(merged, "channel") + " " +
-        get_text_series(merged, "status") + " " +
-        get_text_series(merged, "devicetype_code") + " " +
-        get_text_series(merged, "devicetype_name") + " " +
-        get_text_series(merged, "meter_type_label") + " " +
-        get_text_series(merged, "meter_variable")
-    ).str.lower()
+        normalize_searchable_text_series(merged.get("display_name", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("location_label", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("locationname", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("buildingname", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("deviceid", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get(slave_key, ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("channel", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("status", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("devicetype_code", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("devicetype_name", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("meter_type_label", ""), merged.index) + " " +
+        normalize_searchable_text_series(merged.get("meter_variable", ""), merged.index)
+    ).str.strip()
 
     active_link_mask = (
         get_text_series(merged, "deviceid").ne("") |
@@ -1221,7 +1237,7 @@ def main():
         st.session_state["manual"] = None
         st.rerun()
 
-    search = st.text_input("Zoek", key="search_text")
+    search = st.text_input("Zoek op locatie, device of meter type", key="search_text")
 
     filtered = catalog.copy()
 
@@ -1237,16 +1253,21 @@ def main():
             filtered["slavedeviceid"].astype(str).str.lower().str.contains(slave_filter, na=False)
         ]
 
-    location_filter = st.session_state.get("location_filter", "").strip().lower()
+    location_filter = normalize_searchable_text(st.session_state.get("location_filter", ""))
     if location_filter and "location_label" in filtered.columns:
+        location_search_series = (
+            normalize_searchable_text_series(filtered.get("location_label", ""), filtered.index) + " " +
+            normalize_searchable_text_series(filtered.get("locationname", ""), filtered.index) + " " +
+            normalize_searchable_text_series(filtered.get("buildingname", ""), filtered.index)
+        ).str.strip()
         filtered = filtered[
-            filtered["location_label"].astype(str).str.lower().str.contains(location_filter, na=False)
+            location_search_series.str.contains(location_filter, na=False)
         ]
 
     if search:
-        s = search.lower().strip()
+        s = normalize_searchable_text(search)
         filtered = filtered[
-            filtered["search_text"].fillna("").str.contains(s, na=False)
+            filtered["search_text"].fillna("").astype(str).str.contains(s, na=False)
         ]
 
     if "location_label" in filtered.columns:
