@@ -3289,8 +3289,8 @@ function Show-NodeToolsMenu {
                 Write-Host "Node.js script beëindigd met exitcode $LASTEXITCODE." -ForegroundColor Yellow
             }
 
-            Write-Host "Terug naar het Node.js menu..." -ForegroundColor Green
             $script:__menu_filter = ""
+            Wait-ToolkitContinue -Prompt "Druk op Enter om terug te gaan naar het Node.js menu"
             continue
 
 
