@@ -6,7 +6,30 @@
  *   This file and code may not be modified, reused, or distributed without the prior written consent of the author or organisation.
  */
 
-require('dotenv').config();
+const path = require('path');
+const dotenv = require('dotenv');
+
+const ENV_CANDIDATES = [
+    path.join(__dirname, '.env'),
+    path.join(__dirname, '..', 'python', 'DBscript', '.env'),
+    path.join(__dirname, '..', '..', 'python', 'DBscript', '.env'),
+    path.join(process.cwd(), '.env')
+];
+
+for (const envPath of ENV_CANDIDATES) {
+    try {
+        dotenv.config({ path: envPath, override: false });
+    } catch (e) {
+        // ignore and continue
+    }
+}
+
+if (!process.env.DB_URL1 && process.env.DB_HOST) process.env.DB_URL1 = process.env.DB_HOST;
+if (!process.env.DB_URL2 && process.env.DB_HOST2) process.env.DB_URL2 = process.env.DB_HOST2;
+if (!process.env.DB_USERNAME && process.env.DB_USER) process.env.DB_USERNAME = process.env.DB_USER;
+if (!process.env.DB_URL_PORT && process.env.DB_PORT) process.env.DB_URL_PORT = process.env.DB_PORT;
+if (!process.env.DB_URL_PORT) process.env.DB_URL_PORT = '3306';
+
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const readline = require('readline');
@@ -195,7 +218,6 @@ try {
 } catch (e) {
     // ignore
 }
-const path = require('path');
 const inquirer = require('inquirer');
 const { exec } = require('child_process');
 
@@ -1532,50 +1554,27 @@ async function execute() {
                     process.exit(1);
                 }
             }
-            const dryRunFlag = (typeof extraArg2 !== 'undefined') ? (extraArg2 === 'true' || extraArg2 === '1') : false;
+            const dryRunValue = String(extraArg2 || '').toLowerCase();
+            const dryRunFlag = ['true', '1', 'yes', 'y', 'dryrun'].includes(dryRunValue);
             await execute_change_schakelsettings_4850cm(schema, dryRunFlag);
         } else if (actionChoice === 'D') {
             await execute_enabled_check();
         } else if (actionChoice === 'E') {
             await get_status_per_park();
         } else if (actionChoice === 'F') {
-            console.log(chalk.bold.blue("************ SCHAKELTIJD AANPASSEN MODULES ************"));
-            console.log("Je gaat nu de modules aanpassen naar 60 seconden schakeltijd via de sendlist van een organisatie.");
-
-            const schemaAnswer = await inquirer.prompt([
-                { type: 'input', name: 'schema', message: 'Welk database-schema (organisatie)?' }
-            ]);
-
-            const dryRunAnswer = await inquirer.prompt([
-                {
-                    type: 'list',
-                    name: 'mode',
-                    message: 'Kies uitvoermodus:',
-                    choices: [
-                        { name: 'Dry Run (Veilig - Alleen simuleren)', value: true },
-                        { name: 'Live (LET OP: Wijzigingen worden doorgevoerd!)', value: false }
-                    ],
-                    pageSize: INQUIRER_PAGE_SIZE
-                }
-            ]);
-
-            console.log(`Je gaat nu de sendlist vullen voor organisatie: ${schemaAnswer.schema}.`);
-            if(dryRunAnswer.mode) console.log(chalk.magenta("MODUS: DRY RUN (Geen wijzigingen)"));
-            else console.log(chalk.red("MODUS: LIVE (Wijzigingen worden opgeslagen!)"));
-
-            const confirm = await inquirer.prompt([{ type: 'confirm', name: 'ok', message: 'Weet je zeker dat je wilt doorgaan?', default: false }] );
-
-            if (confirm.ok) {
-                await execute_change_schakelsettings_4850cm(schemaAnswer.schema, dryRunAnswer.mode);
-            } else {
-                process.exit(0);
-            }
+            console.log(chalk.bold.blue("************ UITDRAAI SCHAKELTIJDEN ************"));
+            await uitdraai_schakeltijden_4850();
 
         } else if (actionChoice === 'G') {
-            const searchAnswer = await inquirer.prompt([{ type: 'input', name: 'term', message: 'Zoekterm (regex ondersteund):' }]);
-            if (!searchAnswer.term) { console.log(chalk.red('Geen zoekterm opgegeven.')); process.exit(0); }
+            const searchTerm = (extraArg || '').trim();
+            let finalTerm = searchTerm;
+            if (!finalTerm) {
+                const searchAnswer = await inquirer.prompt([{ type: 'input', name: 'term', message: 'Zoekterm (regex ondersteund):' }]);
+                finalTerm = (searchAnswer.term || '').trim();
+            }
+            if (!finalTerm) { console.log(chalk.red('Geen zoekterm opgegeven.')); process.exit(0); }
             await fillSchemas();
-            perform_search(searchAnswer.term);
+            perform_search(finalTerm);
             console.log(chalk.cyan("************ KLAAR ************"));
             process.exit(0);
         } else if (actionChoice === 'H') {

@@ -2958,7 +2958,10 @@ function Show-LocationDevicesReport {
 function Show-NodeToolsMenu {
 
 
-    $nodeScriptDir = "c:\Users\h.nijdam\OneDrive - I.C.Y. B.V\Scripts\Nodejs 4850cm database tools"
+    $nodeScriptDir = Join-Path $script:ToolkitRoot "Nodejs 4850cm database tools"
+    if (-not (Test-Path $nodeScriptDir)) {
+        $nodeScriptDir = "c:\Users\h.nijdam\OneDrive - I.C.Y. B.V\Scripts\Nodejs 4850cm database tools"
+    }
 
 
     $nodeScript = Join-Path $nodeScriptDir "index.js"
@@ -3162,7 +3165,7 @@ function Show-NodeToolsMenu {
                 if ($dryRunIndex -eq 0) {
 
 
-                    $extraArg2 = "DRYRUN"
+                    $extraArg2 = "true"
 
 
                     Write-Host "Dry-Run Modus INGESCHAKELD. Er worden geen wijzigingen gemaakt." -ForegroundColor Magenta
@@ -3240,18 +3243,13 @@ function Show-NodeToolsMenu {
             try {
 
 
-                # Construct args for Node.
-                # Default: pass only DB so Node runs its interactive menu.
-                # For certain actions (like H) we want to trigger worker-mode but request inquirer prompts
-                # by passing an interactive flag as extraArg.
+                # Construct args for Node worker-mode: always pass DB + action.
+                $argsList = @($dbArg, $actionInput)
                 if ($actionInput -eq 'H') {
-                    # Pass DB + action + -i so Node runs action H but still shows interactive prompts
-                    $argsList = @($dbArg, 'H', '-i')
-                } else {
-                    $argsList = @($dbArg)
-                    if (![string]::IsNullOrEmpty($extraArg)) { $argsList += $extraArg }
-                    if (![string]::IsNullOrEmpty($extraArg2)) { $argsList += $extraArg2 }
+                    $argsList += '-i'
                 }
+                if (![string]::IsNullOrEmpty($extraArg)) { $argsList += $extraArg }
+                if (![string]::IsNullOrEmpty($extraArg2)) { $argsList += $extraArg2 }
 
 
 
