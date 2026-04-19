@@ -1418,11 +1418,11 @@ def main():
             db_user_input = st.text_input("Database gebruiker", value=str(st.session_state.get("db_user", "")).strip() or cfg("DB_USER", "root"))
             db_password_input = st.text_input("Database wachtwoord", value=st.session_state.get("db_password", "") or cfg("DB_PASSWORD", ""), type="password")
             initials_input = st.text_input("Initialen", value=str(st.session_state.get("user_initials", "")).strip() or get_default_initials(), max_chars=6)
-            location_input = st.text_input("Location filter (optioneel)", value=st.session_state.get("location_filter", ""))
+            location_input = st.text_input("Locatiefilter (optioneel)", value=st.session_state.get("location_filter", ""))
             device_id_input = st.text_input("DeviceID (optioneel)", value=st.session_state.get("device_filter", ""))
             slave_device_id_input = st.text_input("SlaveDeviceID (optioneel)", value=st.session_state.get("slave_filter", ""))
             mid_filter_input = st.selectbox(
-                "MID filter",
+                "MID-filter",
                 options=["Alle meters", "Alleen NON MID", "Alleen MID"],
                 index=["Alle meters", "Alleen NON MID", "Alleen MID"].index(
                     st.session_state.get("mid_filter", "Alle meters")

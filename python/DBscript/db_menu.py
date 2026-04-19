@@ -234,23 +234,23 @@ def option_label(option: str) -> str:
     o = option
     lower = option.lower()
     icon = ''
-    if 'back' in lower or '<back>' in lower:
+    if 'back' in lower or '<back>' in lower or 'terug' in lower or '<terug>' in lower:
         icon = ICONS['back'] + ' '
-    elif 'exit' in lower:
+    elif 'exit' in lower or 'afsluiten' in lower:
         icon = ICONS['exit'] + ' '
-    elif 'add' in lower:
+    elif 'add' in lower or 'toevoegen' in lower:
         icon = ICONS['add'] + ' '
-    elif 'remove' in lower or 'delete' in lower:
+    elif 'remove' in lower or 'delete' in lower or 'verwijder' in lower:
         icon = ICONS['remove'] + ' '
-    elif 'change' in lower or 'move' in lower:
+    elif 'change' in lower or 'move' in lower or 'wijzig' in lower:
         icon = ICONS['change'] + ' '
-    elif 'list' in lower or 'bridges' in lower:
+    elif 'list' in lower or 'bridges' in lower or 'lijst' in lower:
         icon = ICONS['list'] + ' '
-    elif 'select' in lower or 'database' in lower:
+    elif 'select' in lower or 'database' in lower or 'kies' in lower or 'selecteer' in lower:
         icon = ICONS['db'] + ' '
     elif 'details' in lower:
         icon = ICONS['details'] + ' '
-    elif 'update' in lower:
+    elif 'update' in lower or 'bijwerken' in lower:
         icon = ICONS['update'] + ' '
     return f"{icon}{o}"
 
@@ -285,7 +285,7 @@ def launch_toolkit_menu(toolkit_path: Optional[str] = None) -> bool:
         subprocess.call([shell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', toolkit_path])
         return True
     except Exception as e:
-        print(f"Failed to launch toolkit: {e}")
+        print(f"Toolkit starten mislukt: {e}")
         return False
 
 if not DB_USER:
@@ -649,7 +649,7 @@ def list_bridges_for_db(database: str, host: Optional[str] = None) -> None:
             clear()
             print(f"\033[36mCustomers Bridges - {database}\033[0m")
             # brief help about navigation keys
-            print("\033[37mPageUp/PgDn: jump a page. Press 'b' to back.\033[0m")
+            print("\033[37mPageUp/PgDn: spring een pagina. Druk op 'b' voor terug.\033[0m")
             # header (include left padding so data columns align with prefixed rows)
             header_prefix = '   '
             # Truncate header text to the column width before padding to avoid overflow
@@ -669,7 +669,7 @@ def list_bridges_for_db(database: str, host: Optional[str] = None) -> None:
 
                 if row is None:
                     # render Back row
-                    text = prefix + '<Back>'
+                    text = prefix + '<Terug>'
                     print(color + text.ljust(window_width) + '\033[0m')
                     continue
 
@@ -740,7 +740,7 @@ def list_bridges_for_db(database: str, host: Optional[str] = None) -> None:
                 if selection == back_index:
                     b_prefix = '-> '
                     b_color = '\033[32m'
-                print(b_color + (b_prefix + '<Back>').ljust(window_width) + '\033[0m')
+                print(b_color + (b_prefix + '<Terug>').ljust(window_width) + '\033[0m')
 
             key = _get_key()
             if key == 'UP':
@@ -768,38 +768,38 @@ def list_bridges_for_db(database: str, host: Optional[str] = None) -> None:
                     break
                 sel_row = sel
                 # build a simple actions menu
-                actions = ['Details', 'Remove', 'Change association (move devices)', 'Back']
+                actions = ['Details', 'Verwijderen', 'Koppeling wijzigen (devices verplaatsen)', 'Terug']
                 act = show_menu(f"Acties voor bridge {sel_row[0]}", actions)
                 if act == 0:
                     clear()
                     print('Details:')
                     for name, val in zip(cols, sel_row):
                         print(f"{name}: {fmt_val(val)}")
-                    input('Press Enter to continue...')
+                    input('Druk op Enter om door te gaan...')
                 elif act == 1:
-                    confirm = input(f"Verwijder bridge {sel_row[0]}? Type 'yes' to confirm: ")
-                    if confirm.lower() == 'yes':
+                    confirm = input(f"Verwijder bridge {sel_row[0]}? Typ 'ja' of 'yes' om te bevestigen: ")
+                    if confirm.lower() in ('ja', 'yes', 'j', 'y'):
                         ok = remove_bridge(database, int(sel_row[0]), host=host)
                         if ok:
-                            print('Removed.')
+                            print('Bridge verwijderd.')
                             # refresh rows
                             rows, cols = load_rows()
                             col_widths = compute_col_widths(rows)
                             selection = min(selection, max(0, len(rows)-1))
                             time.sleep(0.5)
                         else:
-                            print('Remove failed.')
+                            print('Verwijderen mislukt.')
                             time.sleep(1)
                 elif act == 2:
-                    target = input('New inbridgeid to move devices to: ').strip()
+                    target = input('Nieuw inbridgeid waar devices naartoe moeten: ').strip()
                     try:
                         if change_bridge_association(database, int(sel_row[0]), int(target), host=host):
-                            print('Association changed.')
+                            print('Koppeling aangepast.')
                         else:
-                            print('Association change failed.')
+                            print('Aanpassen van koppeling mislukt.')
                     except ValueError:
-                        print('Invalid id')
-                    input('Press Enter to continue...')
+                        print('Ongeldig id')
+                    input('Druk op Enter om door te gaan...')
                 else:
                     # Back from actions - return to table
                     continue
@@ -866,8 +866,8 @@ def choose_database(databases: List[str]) -> Optional[str]:
 
     while True:
         items = filtered_items()
-        # Always show a final 'Back' option so user can explicitly go back
-        display_items = items + ['<Back>']
+        # Always show a final 'Terug' option so user can explicitly go back
+        display_items = items + ['<Terug>']
         if selection >= len(items):
             # allow selection to land on the Back item as well
             selection = max(0, len(display_items) - 1)
@@ -878,8 +878,8 @@ def choose_database(databases: List[str]) -> Optional[str]:
             scroll_offset = selection - list_height + 1
 
         clear()
-        print(f"\033[36mChoose database{(' - filter: ' + query) if query else ''}\033[0m")
-        print("Type to filter, arrows to navigate, Enter to select, Esc to cancel")
+        print(f"\033[36mKies database{(' - filter: ' + query) if query else ''}\033[0m")
+        print("Typ om te filteren, gebruik pijltjes om te navigeren, Enter om te kiezen, Esc om te annuleren")
         print("-" * min(window_width, 200))
 
         for i in range(list_height):
@@ -964,10 +964,10 @@ def choose_database(databases: List[str]) -> Optional[str]:
 
 def add_bridge(database: str, host: Optional[str] = None) -> Optional[int]:
     """Prompt minimally (MAC as hostname, locatie as comment) and insert with requested defaults."""
-    print(f"Adding new bridge to database: {database}")
-    hostname = input("MAC address (hostname) (required): ").strip()
+    print(f"Nieuwe bridge toevoegen aan database: {database}")
+    hostname = input("MAC-adres (hostname) (verplicht): ").strip()
     if not hostname:
-        print("Cancelled: hostname (MAC) is required.")
+        print("Geannuleerd: hostname (MAC) is verplicht.")
         return None
 
     # Defaults per user's request
@@ -978,16 +978,16 @@ def add_bridge(database: str, host: Optional[str] = None) -> Optional[int]:
     inuse = 1
     input_f = 1
     output_f = 1
-    comment = input("Locatie (comment, optional): ").strip() or None
+    comment = input("Locatie (commentaar, optioneel): ").strip() or None
     simnumber = None
     numbernoinreceive = 2000
     errortext = None
     bridgestate = None
-    swversion = input("SW version (optional): ").strip() or None
+    swversion = input("SW-versie (optioneel): ").strip() or None
 
     conn = create_connection(database, host=host)
     if not conn:
-        print("Connection failed")
+        print("Verbinding mislukt")
         return None
     try:
         cur = conn.cursor()
@@ -1033,20 +1033,20 @@ def add_bridge(database: str, host: Optional[str] = None) -> Optional[int]:
             except Exception:
                 new_id = None
         if new_id is None:
-            print("Inserted but could not determine new id.")
+            print("Bridge toegevoegd, maar het nieuwe id kon niet worden bepaald.")
         else:
-            print(f"Inserted new inbridge with id: {new_id}")
+            print(f"Nieuwe inbridge toegevoegd met id: {new_id}")
             try:
-                ans = input("Do you want to restart the service via Toolkit? (Y/N): ").strip().lower()
+                ans = input("Wil je de service via de Toolkit opnieuw starten? (ja/nee): ").strip().lower()
             except KeyboardInterrupt:
                 ans = 'n'
-            if ans == 'y':
+            if ans in ('y', 'yes', 'j', 'ja'):
                 launch_toolkit_menu()
                 sys.exit(0)
         return new_id
     except mysql.connector.Error as e:
         conn.rollback()
-        print(f"Failed to insert bridge: {e}")
+        print(f"Toevoegen van bridge mislukt: {e}")
         return None
     finally:
         try:
@@ -1063,7 +1063,7 @@ def remove_bridge(database: str, inbridgeid: int, host: Optional[str] = None) ->
     """Safely remove an inbridge: set referencing devices' inbridgeid to NULL then delete."""
     conn = create_connection(database, host=host)
     if not conn:
-        print("Connection failed")
+        print("Verbinding mislukt")
         return False
     try:
         cur = conn.cursor()
@@ -1075,7 +1075,7 @@ def remove_bridge(database: str, inbridgeid: int, host: Optional[str] = None) ->
             return True
         except mysql.connector.Error as e:
             conn.rollback()
-            print(f"Failed to remove bridge: {e}")
+            print(f"Verwijderen van bridge mislukt: {e}")
             return False
     finally:
         cur.close()
@@ -1086,7 +1086,7 @@ def change_bridge_association(database: str, old_id: int, new_id: int, host: Opt
     """Move devices from old inbridgeid to new inbridgeid."""
     conn = create_connection(database, host=host)
     if not conn:
-        print("Connection failed")
+        print("Verbinding mislukt")
         return False
     try:
         cur = conn.cursor()
@@ -1094,16 +1094,16 @@ def change_bridge_association(database: str, old_id: int, new_id: int, host: Opt
             cur.execute("UPDATE device SET inbridgeid = %s WHERE inbridgeid = %s", (new_id, old_id))
             conn.commit()
             try:
-                ans = input("Do you want to restart the service via Toolkit? (Y/N): ").strip().lower()
+                ans = input("Wil je de service via de Toolkit opnieuw starten? (ja/nee): ").strip().lower()
             except KeyboardInterrupt:
                 ans = 'n'
-            if ans == 'y':
+            if ans in ('y', 'yes', 'j', 'ja'):
                 launch_toolkit_menu()
                 sys.exit(0)
             return True
         except mysql.connector.Error as e:
             conn.rollback()
-            print(f"Failed to change association: {e}")
+            print(f"Wijzigen van koppeling mislukt: {e}")
             return False
     finally:
         cur.close()
@@ -1113,35 +1113,35 @@ def change_bridge_association(database: str, old_id: int, new_id: int, host: Opt
 def update_device_field(database: str, host: Optional[str] = None) -> None:
     """Prompt to update a device's `devid` or `address` field."""
     db = database
-    devid = input("Device id (primary key) to update: ").strip()
+    devid = input("Device id (primaire sleutel) om bij te werken: ").strip()
     if not devid:
-        print("Cancelled")
+        print("Geannuleerd")
         return
-    field = input("Field to update (devid/address): ").strip()
+    field = input("Veld om bij te werken (devid/address): ").strip()
     if field not in ("devid", "address"):
-        print("Unsupported field")
+        print("Niet-ondersteund veld")
         return
-    value = input(f"New value for {field}: ").strip()
+    value = input(f"Nieuwe waarde voor {field}: ").strip()
     conn = create_connection(db, host=host)
     if not conn:
-        print("Connection failed")
+        print("Verbinding mislukt")
         return
     try:
         cur = conn.cursor()
         try:
             cur.execute(f"UPDATE device SET {field} = %s WHERE devid = %s", (value, devid))
             conn.commit()
-            print("Updated.")
+            print("Bijgewerkt.")
             try:
-                ans = input("Do you want to restart the service via Toolkit? (Y/N): ").strip().lower()
+                ans = input("Wil je de service via de Toolkit opnieuw starten? (ja/nee): ").strip().lower()
             except KeyboardInterrupt:
                 ans = 'n'
-            if ans == 'y':
+            if ans in ('y', 'yes', 'j', 'ja'):
                 launch_toolkit_menu()
                 sys.exit(0)
         except mysql.connector.Error as e:
             conn.rollback()
-            print(f"Failed to update device: {e}")
+            print(f"Bijwerken van device mislukt: {e}")
     finally:
         cur.close()
         conn.close()
@@ -1154,34 +1154,34 @@ def update_device_mac(database: str, host: Optional[str] = None) -> None:
     so the user isn't asked to choose a field — we directly update `address`.
     """
     db = database
-    devid = input("Device id (primary key) to update: ").strip()
+    devid = input("Device id (primaire sleutel) om bij te werken: ").strip()
     if not devid:
-        print("Cancelled")
+        print("Geannuleerd")
         return
-    value = input("New MAC address (address): ").strip()
+    value = input("Nieuw MAC-adres (address): ").strip()
     if not value:
-        print("Cancelled: no value provided")
+        print("Geannuleerd: geen waarde opgegeven")
         return
     conn = create_connection(db, host=host)
     if not conn:
-        print("Connection failed")
+        print("Verbinding mislukt")
         return
     try:
         cur = conn.cursor()
         try:
             cur.execute("UPDATE device SET address = %s WHERE devid = %s", (value, devid))
             conn.commit()
-            print("Updated MAC/address.")
+            print("MAC-adres bijgewerkt.")
             try:
-                ans = input("Do you want to restart the service via Toolkit? (Y/N): ").strip().lower()
+                ans = input("Wil je de service via de Toolkit opnieuw starten? (ja/nee): ").strip().lower()
             except KeyboardInterrupt:
                 ans = 'n'
-            if ans == 'y':
+            if ans in ('y', 'yes', 'j', 'ja'):
                 launch_toolkit_menu()
                 sys.exit(0)
         except mysql.connector.Error as e:
             conn.rollback()
-            print(f"Failed to update device MAC: {e}")
+            print(f"Bijwerken van device-MAC mislukt: {e}")
     finally:
         try:
             cur.close()
@@ -1200,18 +1200,18 @@ def update_inbridge_mac(database: str, host: Optional[str] = None) -> None:
     clear feedback about whether the update affected any rows.
     """
     db = database
-    bridge_id = input("Inbridge id (primary key) to update: ").strip()
+    bridge_id = input("Inbridge id (primaire sleutel) om bij te werken: ").strip()
     if not bridge_id:
-        print("Cancelled")
+        print("Geannuleerd")
         return
-    new_mac = input("New MAC address (hostname): ").strip()
+    new_mac = input("Nieuw MAC-adres (hostname): ").strip()
     if not new_mac:
-        print("Cancelled: no value provided")
+        print("Geannuleerd: geen waarde opgegeven")
         return
 
     conn = create_connection(db, host=host)
     if not conn:
-        print("Connection failed")
+        print("Verbinding mislukt")
         return
     try:
         cur = conn.cursor()
@@ -1219,19 +1219,19 @@ def update_inbridge_mac(database: str, host: Optional[str] = None) -> None:
             cur.execute("UPDATE inbridge SET hostname = %s WHERE inbridgeid = %s", (new_mac, bridge_id))
             conn.commit()
             if cur.rowcount == 0:
-                print("No bridge updated: check the inbridge id you provided.")
+                print("Geen bridge bijgewerkt: controleer het opgegeven inbridge-id.")
             else:
-                print(f"Updated bridge {bridge_id} hostname -> {new_mac} (rows affected: {cur.rowcount})")
+                print(f"Bridge {bridge_id} bijgewerkt: hostname -> {new_mac} (gewijzigde rijen: {cur.rowcount})")
                 try:
-                    ans = input("Do you want to restart the service via Toolkit? (Y/N): ").strip().lower()
+                    ans = input("Wil je de service via de Toolkit opnieuw starten? (ja/nee): ").strip().lower()
                 except KeyboardInterrupt:
                     ans = 'n'
-                if ans == 'y':
+                if ans in ('y', 'yes', 'j', 'ja'):
                     launch_toolkit_menu()
                     sys.exit(0)
         except mysql.connector.Error as e:
             conn.rollback()
-            print(f"Failed to update inbridge hostname: {e}")
+            print(f"Bijwerken van inbridge-hostname mislukt: {e}")
     finally:
         try:
             cur.close()
@@ -1256,12 +1256,12 @@ def manage_database_menu(database: str):
 
     try:
         while True:
-            options = ["List bridges", "Add bridge", "Change bridge association (old->new)", "Update bridge MAC-address", "Back"]
+            options = ["Bridges weergeven", "Bridge toevoegen", "Bridgekoppeling wijzigen (oud->nieuw)", "Bridge MAC-adres bijwerken", "Terug"]
             choice = show_menu(f"Bridges - {schema}", options)
             if choice == 0:
                 list_bridges_for_db(schema, host=host)
                 try:
-                    input("Press Enter to continue...")
+                    input("Druk op Enter om door te gaan...")
                 except KeyboardInterrupt:
                     return
                 continue
@@ -1272,26 +1272,26 @@ def manage_database_menu(database: str):
                 else:
                     print("Bridge creation returned no id.")
                 try:
-                    input("Press Enter to continue...")
+                    input("Druk op Enter om door te gaan...")
                 except KeyboardInterrupt:
                     return
             elif choice == 2:
                 try:
-                    old = input("Old inbridgeid: ").strip()
-                    new = input("New inbridgeid: ").strip()
+                    old = input("Oud inbridgeid: ").strip()
+                    new = input("Nieuw inbridgeid: ").strip()
                 except KeyboardInterrupt:
                     return
                 try:
                     ok = change_bridge_association(schema, int(old), int(new), host=host)
                 except ValueError:
-                    print("Invalid ids")
+                    print("Ongeldige ids")
                     ok = False
                 if ok:
-                    print("Association changed.")
+                    print("Koppeling aangepast.")
                 else:
-                    print("Association change failed.")
+                    print("Aanpassen van koppeling mislukt.")
                 try:
-                    input("Press Enter to continue...")
+                    input("Druk op Enter om door te gaan...")
                 except KeyboardInterrupt:
                     return
             elif choice == 3:
@@ -1300,7 +1300,7 @@ def manage_database_menu(database: str):
                 except KeyboardInterrupt:
                     return
                 try:
-                    input("Press Enter to continue...")
+                    input("Druk op Enter om door te gaan...")
                 except KeyboardInterrupt:
                     return
             else:
@@ -1312,14 +1312,14 @@ def manage_database_menu(database: str):
 def main_menu():
     databases = fetch_databases()
     if not databases:
-        print("No databases available.")
+        print("Geen databases beschikbaar.")
         return
     options = [
-        "Select a database and manage bridges",
-        "Bridge health scan (alle bridges, export ca. 10 min)",
-        "Poll fails scan (>15% fails, export)",
-        "Historische log backup (laatste 14 dagen)",
-        "Exit"
+        "Kies een database en beheer bridges",
+        "Bridge gezondheidsscan (alle bridges, export ca. 10 min)",
+        "Poll fail-scan (>15% fails, export)",
+        "Historische logback-up (laatste 14 dagen)",
+        "Afsluiten"
     ]
     # Detect venv python.exe
     venv_python = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'virt-dahs', 'Scripts', 'python.exe'))
@@ -1327,7 +1327,7 @@ def main_menu():
         venv_python = sys.executable
     try:
         while True:
-            choice = show_menu("=== DB Menu ===", options)
+            choice = show_menu("=== Databasemenu ===", options)
             if choice == 0:
                 db = choose_database(databases)
                 if not db:
@@ -1335,28 +1335,28 @@ def main_menu():
                 manage_database_menu(db)
             elif choice == 1:
                 # Bridge health scan
-                print("Bridge health scan wordt gestart...")
+                print("Bridge gezondheidsscan wordt gestart...")
                 try:
                     subprocess.call([venv_python, os.path.join(os.path.dirname(__file__), "list_bridges_prompt.py"), "--action", "all", "--export", "./bridge_scan_menu_output", "--gap-minutes", "20", "--window-days", "4", "--restart-window-threshold", "20"])
                 except Exception as e:
-                    print(f"Fout bij uitvoeren bridge health scan: {e}")
+                    print(f"Fout bij uitvoeren van bridge gezondheidsscan: {e}")
                 try:
                     input("Druk op Enter om terug te keren naar het menu...")
                 except KeyboardInterrupt:
                     return
             elif choice == 2:
                 # Poll fails scan
-                print("Poll fails scan wordt gestart...")
+                print("Poll fail-scan wordt gestart...")
                 try:
                     subprocess.call([venv_python, os.path.join(os.path.dirname(__file__), "list_bridges_prompt.py"), "--action", "pollall", "--export", "./pollfail_menu_output", "--poll-threshold", "15"])
                 except Exception as e:
-                    print(f"Fout bij uitvoeren poll fails scan: {e}")
+                    print(f"Fout bij uitvoeren van poll fail-scan: {e}")
                 try:
                     input("Druk op Enter om terug te keren naar het menu...")
                 except KeyboardInterrupt:
                     return
             elif choice == 3:
-                print("Historische log backup over de laatste 14 dagen wordt gestart...")
+                print("Historische logback-up over de laatste 14 dagen wordt gestart...")
                 try:
                     subprocess.call([venv_python, os.path.join(os.path.dirname(__file__), "backup_recent_logs.py"), "--days", "14"])
                 except Exception as e:
@@ -1368,9 +1368,9 @@ def main_menu():
             elif choice == 4 or choice is None or choice < 0:
                 break
             else:
-                print("Invalid choice")
+                print("Ongeldige keuze")
                 try:
-                    input("Press Enter to continue...")
+                    input("Druk op Enter om door te gaan...")
                 except KeyboardInterrupt:
                     return
     except KeyboardInterrupt:

@@ -1002,10 +1002,10 @@ def analyze_open_recent_all(days: int = 1, include_system: bool = False, export_
 
 def main_menu():
     options = [
-        "List databases",
-        "Enumerate all bridges (all DBs)",
-        "Select a database and manage bridges",
-        "Exit"
+        "Databases weergeven",
+        "Alle bridges tonen (alle databases)",
+        "Kies een database en beheer bridges",
+        "Afsluiten"
     ]
     # This helper script shouldn't attempt to use the interactive selector
     # from `db_menu.py`. Keep a simple prompt-based entrypoint below.
@@ -1013,11 +1013,23 @@ def main_menu():
 
 def main():
     # legacy interactive entrypoint preserved for backward compatibility
-    db = input("Database name (or blank to exit): ").strip()
+    db = input("Databasenaam (of leeg om af te sluiten): ").strip()
     if not db:
-        print("No database provided. Exiting.")
+        print("Geen database opgegeven. Afsluiten.")
         return
-    action = input("Enter 'a' to analyze this DB, 'poll' to check poll-failures, 'all' to analyze all databases, 'pollall' to check poll-failures across all DBs, or press Enter to list bridges: ").strip().lower()
+    raw_action = input("Typ 'a' of 'analyse' voor deze database, 'poll' voor poll-failures, 'all' of 'alles' voor alle databases, 'pollall' of 'pollalles' voor alle poll-failures, of druk op Enter om bridges te tonen: ").strip().lower()
+    action = {
+        'a': 'a',
+        'analyse': 'a',
+        'analyze': 'a',
+        'all': 'all',
+        'alles': 'all',
+        'poll': 'poll',
+        'pollall': 'pollall',
+        'pollalles': 'pollall',
+        'lijst': '',
+        '': '',
+    }.get(raw_action, raw_action)
     if action == 'a' or action == 'analyze':
         try:
             gm = input("Gap threshold minutes (default 15): ").strip()

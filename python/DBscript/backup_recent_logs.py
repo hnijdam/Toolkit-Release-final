@@ -204,6 +204,20 @@ def split_csv_values(raw: str) -> list[str]:
     return [item.strip() for item in raw.replace(";", ",").split(",") if item.strip()]
 
 
+def confirm_all_databases_backup() -> bool:
+    """Require explicit confirmation before backing up every database."""
+    while True:
+        answer = input(
+            "Geen database ingevuld = backup van ALLE databases. Typ 'yes' om door te gaan of 'q' om te stoppen: "
+        ).strip().lower()
+        if answer == "yes":
+            return True
+        if answer == "q":
+            print("Backup geannuleerd. Terug naar het vorige menu.")
+            return False
+        print("Ongeldige invoer. Typ 'yes' om door te gaan of 'q' om te stoppen.")
+
+
 def find_matching_column(columns: list[str], candidates: list[str]) -> Optional[str]:
     lower_map = {name.lower(): name for name in columns}
     for candidate in candidates:
@@ -698,6 +712,8 @@ def main() -> int:
             db_input = input("Database naam (optioneel, komma-gescheiden; leeg = alle databases): ").strip()
             if db_input:
                 requested_databases = split_csv_values(db_input)
+            elif not confirm_all_databases_backup():
+                return 0
 
         if not device_id:
             device_input = input("DeviceID (optioneel): ").strip()

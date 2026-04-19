@@ -42,17 +42,165 @@ Import-Module PSReadLine -ErrorAction SilentlyContinue
 
 $script:ToolkitRoot = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 $script:SharedEnvPath = $null
+$script:SshKeyPath = $null
+$script:SshConfigPath = $null
+$script:SshExePath = $null
+$script:ScpExePath = $null
 
 try { Set-Location -Path $script:ToolkitRoot } catch {}
 
+function Get-ToolkitOpenSshPath {
+    param([string]$CommandName)
 
+    $cmd = Get-Command $CommandName -CommandType Application -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $CommandName
+}
 
+function Get-ToolkitSshConfigPath {
+    $candidates = @(
+        (Join-Path $env:USERPROFILE '.ssh\config'),
+        (Join-Path $HOME '.ssh\config')
+    ) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+    } | Select-Object -Unique
 
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    return $null
+}
+
+function Resolve-ToolkitSshKey {
+    $explicitCandidates = @($env:SSH_KEY_PATH, $env:SSH_KEY) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+    }
+
+    foreach ($candidate in $explicitCandidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    $configPath = Get-ToolkitSshConfigPath
+    if ($configPath) {
+        foreach ($line in Get-Content -Path $configPath -ErrorAction SilentlyContinue) {
+            $trimmed = $line.Trim()
+            if ($trimmed -match '^(?i)IdentityFile\s+(.+)$') {
+                $configValue = $matches[1].Trim().Trim('"').Trim("'")
+                if ($configValue.StartsWith('~/')) {
+                    $configValue = Join-Path $HOME (($configValue.Substring(2)) -replace '/', '\\')
+                }
+                $expandedValue = [Environment]::ExpandEnvironmentVariables($configValue)
+                if (Test-Path $expandedValue) {
+                    return (Resolve-Path $expandedValue).Path
+                }
+            }
+        }
+    }
+
+    $fallbackCandidates = @(
+        (Join-Path $env:USERPROFILE '.ssh\id_ed25519'),
+        (Join-Path $env:USERPROFILE '.ssh\id_rsa'),
+        (Join-Path $env:USERPROFILE '.ssh\ecdsa-key-20241004-openssh.pem')
+    ) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+    } | Select-Object -Unique
+
+    foreach ($candidate in $fallbackCandidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    return $null
+}
+
+function Invoke-ToolkitOpenSsh {
+    param(
+        [string]$Executable,
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [object[]]$CliArgs
+    )
+
+    $resolvedKey = Resolve-ToolkitSshKey
+    $resolvedConfig = Get-ToolkitSshConfigPath
+    $script:SshKeyPath = $resolvedKey
+    $script:SshConfigPath = $resolvedConfig
+    $forwardArgs = New-Object System.Collections.Generic.List[object]
+
+    if (-not [string]::IsNullOrWhiteSpace($resolvedConfig)) {
+        $forwardArgs.Add('-F')
+        $forwardArgs.Add($resolvedConfig)
+    }
+
+    for ($i = 0; $i -lt $CliArgs.Count; $i++) {
+        $arg = [string]$CliArgs[$i]
+
+        if ([string]::IsNullOrWhiteSpace($arg)) {
+            continue
+        }
+
+        if ($arg -eq '-i') {
+            $nextArg = if ($i + 1 -lt $CliArgs.Count) { [string]$CliArgs[$i + 1] } else { $null }
+
+            if (-not [string]::IsNullOrWhiteSpace($resolvedKey)) {
+                $forwardArgs.Add('-i')
+                $forwardArgs.Add($resolvedKey)
+                if ($i + 1 -lt $CliArgs.Count) {
+                    $i++
+                }
+                continue
+            }
+
+            if (
+                [string]::IsNullOrWhiteSpace($nextArg) -or (
+                    $nextArg -match '^[A-Za-z]:\\' -or
+                    $nextArg -match '^/' -or
+                    $nextArg -match '\.(pem|ppk|key)$' -or
+                    $nextArg -like '*ssh-key*'
+                )
+            ) {
+                if ($i + 1 -lt $CliArgs.Count) {
+                    $i++
+                }
+            }
+            continue
+        }
+
+        $forwardArgs.Add($CliArgs[$i])
+    }
+
+    & $Executable @($forwardArgs.ToArray())
+}
+
+function Invoke-ToolkitSsh {
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [object[]]$CliArgs
+    )
+
+    Invoke-ToolkitOpenSsh -Executable $script:SshExePath -CliArgs $CliArgs
+}
+
+function Invoke-ToolkitScp {
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [object[]]$CliArgs
+    )
+
+    Invoke-ToolkitOpenSsh -Executable $script:ScpExePath -CliArgs $CliArgs
+}
 
 # SSH sleutel
-
-
-$sshKey = if ($env:SSH_KEY_PATH) { $env:SSH_KEY_PATH } elseif ($env:SSH_KEY) { $env:SSH_KEY } else { "C:\Path\To\ssh-key.pem" }
+$script:SshExePath = Get-ToolkitOpenSshPath -CommandName 'ssh.exe'
+$script:ScpExePath = Get-ToolkitOpenSshPath -CommandName 'scp.exe'
+$script:SshConfigPath = Get-ToolkitSshConfigPath
+$script:SshKeyPath = Resolve-ToolkitSshKey
+$sshKey = $script:SshKeyPath
 
 
 
@@ -64,16 +212,16 @@ $sshKey = if ($env:SSH_KEY_PATH) { $env:SSH_KEY_PATH } elseif ($env:SSH_KEY) { $
 $servers = @(
 
 
-    @{ Name = "Ymir (Productie)"; HostName = "ymir.icy.nl"; User = "hnijdam" },
+    @{ Name = "Ymir (Productie)"; HostName = "prod2"; User = "hnijdam" },
 
 
-    @{ Name = "IcyCCCloud (Productie)"; HostName = "icycccloud.icy.nl"; User = "hnijdam" },
+    @{ Name = "IcyCCCloud (Productie)"; HostName = "prod1"; User = "hnijdam" },
 
 
-    @{ Name = "Dispatch (Productie)"; HostName = "dispatch.icy.nl"; User = "hnijdam" },
+    @{ Name = "Dispatch (Productie)"; HostName = "prod3"; User = "hnijdam" },
 
 
-    @{ Name = "IcyCCAppAPI (Productie)"; HostName = "icyccappapi.icy.nl"; User = "hnijdam" }
+    @{ Name = "IcyCCAppAPI (Productie)"; HostName = "prod4"; User = "hnijdam" }
 
 
 )
@@ -122,6 +270,35 @@ function Wait-ToolkitContinue {
     Write-Host ""
     try { [Console]::CursorVisible = $true } catch {}
     Read-Host $Prompt | Out-Null
+}
+
+function Show-ScriptIntro {
+    param(
+        [string]$Title,
+        [string[]]$DescriptionLines,
+        [string]$Prompt = "Druk op Enter om door te gaan of typ q om terug te gaan"
+    )
+
+    Clear-Host
+    Write-Host (("=" * 70)) -ForegroundColor DarkGray
+    Write-Host ("Welkom bij {0}" -f $Title) -ForegroundColor Cyan
+    Write-Host (("=" * 70)) -ForegroundColor DarkGray
+    Write-Host ""
+
+    foreach ($line in $DescriptionLines) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            Write-Host ("- " + $line) -ForegroundColor White
+        }
+    }
+
+    Write-Host ""
+    $choice = Read-Host $Prompt
+    if ($choice -match '^(q|quit|stop|terug)$') {
+        Write-Host "Terug naar het menu..." -ForegroundColor Yellow
+        return $false
+    }
+
+    return $true
 }
 
 function Show-Menu {
@@ -259,7 +436,7 @@ function Show-Menu {
             if ($Filter) {
 
 
-                if (-not $script:__menu_filter) { $script:__menu_filter = "" }
+                if ([string]::IsNullOrWhiteSpace($script:__menu_filter)) { $script:__menu_filter = "" }
 
 
                 Write-Host ("Filter: " + $script:__menu_filter).PadRight($windowWidth - 1) -ForegroundColor Yellow
@@ -703,7 +880,7 @@ function Invoke-Export {
         # Stap 1: Remote uitvoeren naar temp file (zodat sudo prompt niet in de file komt)
 
 
-        ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "sudo $cmd > $remoteTemp"
+        Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "sudo $cmd > $remoteTemp")
 
 
 
@@ -712,7 +889,7 @@ function Invoke-Export {
         # Stap 2: Downloaden
 
 
-        scp -q -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName):$remoteTemp" $exportFile
+        Invoke-ToolkitScp @('-q', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName):$remoteTemp", $exportFile)
 
 
 
@@ -721,7 +898,7 @@ function Invoke-Export {
         # Stap 3: Opruimen
 
 
-        ssh -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "rm $remoteTemp"
+        Invoke-ToolkitSsh @('-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "rm $remoteTemp")
 
 
 
@@ -1453,7 +1630,7 @@ function Show-DispatchSearch($server) {
         if ($selection -eq 0) {
 
 
-            ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "grep -Ei '$searchQuery' /var/log/dispatch/dispatch.log | tail -n 20"
+            Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "grep -Ei '$searchQuery' /var/log/dispatch/dispatch.log | tail -n 20")
 
 
             Pause
@@ -1468,7 +1645,7 @@ function Show-DispatchSearch($server) {
                     Write-Host "Live volgen gestart, druk CTRL+C om te stoppen..." -ForegroundColor Cyan
 
 
-            ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "tail -f /var/log/dispatch/dispatch.log | grep -Ei --line-buffered --color=always '$searchQuery'"
+            Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "tail -f /var/log/dispatch/dispatch.log | grep -Ei --line-buffered --color=always '$searchQuery'")
 
 
         }
@@ -1507,7 +1684,7 @@ function Show-IcyCCAppAPILog($server) {
 
 
 
-        $files = ssh -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "ls -1 /var/lib/wildfly/production/standalone/log/" 2>$null
+        $files = Invoke-ToolkitSsh @('-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", 'ls -1 /var/lib/wildfly/production/standalone/log/') 2>$null
 
 
         if (-not $files) {
@@ -1600,7 +1777,7 @@ function Show-IcyCCAppAPILog($server) {
                     Write-Host "Live volgen gestart, CTRL+C om te stoppen..." -ForegroundColor Cyan
 
 
-                    ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "sudo $tailCmd"
+                    Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "sudo $tailCmd")
 
 
                 }
@@ -1633,7 +1810,7 @@ function Show-IcyCCAppAPILog($server) {
                         $cmd = "sudo grep -Ei --color=always '$pattern' $remoteFile | tail -n 100"
 
 
-                    ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" $cmd
+                    Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", $cmd)
 
 
                     $exportChoice = Read-Host "Wil je deze zoekresultaten exporteren? (J/N)"
@@ -1840,6 +2017,8 @@ function Show-IcyCCAppAPILog($server) {
 function Show-ServiceMenu($server) {
 
 
+    $script:__menu_filter = ""
+
     while ($true) {
 
 
@@ -1849,7 +2028,7 @@ function Show-ServiceMenu($server) {
         $rawCommand = 'systemctl list-units --type=service --no-pager --no-legend "icycc-*.service"'
 
 
-        $rawServices = ssh -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" $rawCommand
+        $rawServices = Invoke-ToolkitSsh @('-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", $rawCommand)
 
 
         $services = $rawServices |
@@ -1873,7 +2052,12 @@ function Show-ServiceMenu($server) {
             Sort-Object -Unique
 
 
-
+        if (-not $services -or $services.Count -eq 0) {
+            Write-Host "Geen services gevonden of SSH-login mislukt voor $($server.Name)." -ForegroundColor Red
+            Write-Host "Controleer de SSH-config alias of de verbinding en probeer opnieuw." -ForegroundColor Yellow
+            Wait-ToolkitContinue
+            return
+        }
 
 
         $menuOptions = @()
@@ -1897,7 +2081,7 @@ function Show-ServiceMenu($server) {
         if ($server.Name -like "*Dispatch*") {
 
 
-            $menuOptions += "MAC Log Search (dispatch.log)"
+            $menuOptions += "MAC-log zoeken (dispatch.log)"
 
 
             $hasDispatch = $true
@@ -1909,7 +2093,7 @@ function Show-ServiceMenu($server) {
         if ($server.Name -like "*IcyCCAppAPI*") {
 
 
-            $menuOptions += "Log Browser (ICYCCAppAPI)"
+            $menuOptions += "Logbrowser (ICYCCAppAPI)"
 
 
             $hasAppApi = $true
@@ -1924,7 +2108,7 @@ function Show-ServiceMenu($server) {
 
 
 
-        $selection = Show-Menu -Title "Service Menu - $($server.Name)" -Options $menuOptions -Filter
+        $selection = Show-Menu -Title "Servicemenu - $($server.Name)" -Options $menuOptions -Filter
 
 
 
@@ -2064,9 +2248,11 @@ function Get-DbEnvPath {
     $candidates = @(
         $script:SharedEnvPath,
         (Join-Path $root "python\DBscript\.env"),
+        (Join-Path $root "python\Pulse Counter Offset Tool\.env"),
         (Join-Path $root "DBscript\.env"),
         (Join-Path $root ".env"),
         (Join-Path $parentRoot "python\DBscript\.env"),
+        (Join-Path $parentRoot "python\Pulse Counter Offset Tool\.env"),
         (Join-Path $parentRoot "DBscript\.env"),
         (Join-Path $parentRoot ".env")
     ) | Select-Object -Unique
@@ -2104,6 +2290,8 @@ function Import-ToolkitEnv {
         }
     }
 
+    $script:SharedEnvPath = $envPath
+
     if (-not $Quiet) {
         Write-Host "DB .env geladen vanaf $envPath" -ForegroundColor DarkGray
     }
@@ -2115,7 +2303,7 @@ function Import-ToolkitEnv {
 function Show-BridgeComlogMenu {
     $py = Get-PythonExePath
     if (-not $py) {
-        Write-Host "Python executable not found. Please install Python or adjust the venv path." -ForegroundColor Red
+        Write-Host "Python-uitvoerbaar bestand niet gevonden. Installeer Python of pas het venv-pad aan." -ForegroundColor Red
         Pause
         return
     }
@@ -2125,20 +2313,28 @@ function Show-BridgeComlogMenu {
         $scriptPath = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "Bridge TX\Bridge_Comlog_Viewer.py"
     }
     if (-not (Test-Path $scriptPath)) {
-        Write-Host "Bridge_Comlog_Viewer.py not found at $scriptPath" -ForegroundColor Red
+        Write-Host "Bridge_Comlog_Viewer.py niet gevonden op $scriptPath" -ForegroundColor Red
         Pause
         return
     }
     try { $scriptFull = (Resolve-Path $scriptPath).Path } catch { $scriptFull = $scriptPath }
 
+    if (-not (Show-ScriptIntro -Title "Bridge Comlog Viewer" -DescriptionLines @(
+        "Met dit script bekijk je communicatie- en comloggegevens van bridges.",
+        "Daarna kies je zelf de database, klant, tijdsperiode, filter en sortering.",
+        "Typ q als je wilt annuleren en terug wilt gaan."
+    ))) {
+        return
+    }
+
     $dbOptions = @(
-        "mysql",
-        "mariadb",
-        "Cancel"
+        "MySQL",
+        "MariaDB",
+        "Annuleren"
     )
     $dbSel = Show-Menu -Title "Bridge Comlog - Kies database" -Options $dbOptions
     if ($dbSel -lt 0 -or $dbSel -eq ($dbOptions.Count - 1)) { return }
-    $database = $dbOptions[$dbSel]
+    $database = $dbOptions[$dbSel].ToLower()
 
     $klantDb = Read-Host "Klant DB naam (bijv. nl_voorbeeld)"
     if ([string]::IsNullOrWhiteSpace($klantDb)) {
@@ -2177,19 +2373,20 @@ function Show-BridgeComlogMenu {
     if ([string]::IsNullOrWhiteSpace($filterInput)) { $filterInput = "" }
 
     $sortOptions = @(
-        "bridge_id (default)",
-        "restart",
-        "filtered",
-        "unfiltered",
-        "poll_pct",
-        "fail_pct",
-        "bridgetype",
-        "swversion",
-        "Cancel"
+        @{ Label = "bridge_id (standaard)"; Value = "bridge_id" },
+        @{ Label = "restart"; Value = "restart" },
+        @{ Label = "gefilterd"; Value = "filtered" },
+        @{ Label = "ongefilterd"; Value = "unfiltered" },
+        @{ Label = "poll_pct"; Value = "poll_pct" },
+        @{ Label = "fail_pct"; Value = "fail_pct" },
+        @{ Label = "bridgetype"; Value = "bridgetype" },
+        @{ Label = "swversion"; Value = "swversion" },
+        @{ Label = "Annuleren"; Value = $null }
     )
-    $sortSel = Show-Menu -Title "Sorteer op" -Options $sortOptions
-    if ($sortSel -lt 0 -or $sortSel -eq ($sortOptions.Count - 1)) { return }
-    if ($sortSel -eq 0) { $sortBy = "bridge_id" } else { $sortBy = $sortOptions[$sortSel] }
+    $sortLabels = $sortOptions | ForEach-Object { $_.Label }
+    $sortSel = Show-Menu -Title "Sorteer op" -Options $sortLabels
+    if ($sortSel -lt 0 -or $sortSel -eq ($sortLabels.Count - 1)) { return }
+    $sortBy = $sortOptions[$sortSel].Value
 
     $args = @(
         $database,
@@ -2201,10 +2398,10 @@ function Show-BridgeComlogMenu {
         $sortBy
     )
 
-    Write-Host "Starting Bridge Comlog Viewer..." -ForegroundColor Yellow
+    Write-Host "Bridge Comlog Viewer wordt gestart..." -ForegroundColor Yellow
     Write-Host "Python: $py" -ForegroundColor Cyan
     Write-Host "Script: $scriptFull" -ForegroundColor Cyan
-    Write-Host ("Run: database={0}, klant={1}, minutes={2}, sort={3}" -f $database, $klantDb, $minutes, $sortBy) -ForegroundColor Cyan
+    Write-Host ("Start met: database={0}, klant={1}, minuten={2}, sortering={3}" -f $database, $klantDb, $minutes, $sortBy) -ForegroundColor Cyan
     & $py $scriptFull @args
     Pause
 }
@@ -2218,8 +2415,16 @@ function Start-PulseCounterOffsetTool {
 
     $launcherPath = Join-Path $scriptRoot "python\Pulse Counter Offset Tool\start_standalone.ps1"
     if (-not (Test-Path $launcherPath)) {
-        Write-Host "start_standalone.ps1 not found at $launcherPath" -ForegroundColor Red
+        Write-Host "start_standalone.ps1 niet gevonden op $launcherPath" -ForegroundColor Red
         Pause
+        return
+    }
+
+    if (-not (Show-ScriptIntro -Title "Pulse Counter Offset Tool" -DescriptionLines @(
+        "Met dit script beheer je pulscounter offsets en controleer je meterstanden.",
+        "De webtool opent hierna automatisch in je browser.",
+        "Typ q als je wilt annuleren en terug wilt gaan."
+    ))) {
         return
     }
 
@@ -2239,21 +2444,21 @@ function Show-BridgeScriptsMenu {
     while ($true) {
         $options = @(
             "Bridgebeheer",
-            "Bridge health scan",
-            "Poll fails scan",
+            "Bridge gezondheidsscan",
+            "Poll fail-scan",
             "Bridge Comlog Viewer",
             "Pulse Counter Offset Tool",
-            "Log backup (laatste 14 dagen)",
+            "Logback-up (laatste 14 dagen)",
             "Terug"
         )
 
-        $selection = Show-Menu -Title "Python Scripts" -Options $options
+        $selection = Show-Menu -Title "Python-scripts" -Options $options
 
         if ($selection -ge 0 -and $selection -le 5) {
             Import-ToolkitEnv -Quiet | Out-Null
             $py = Get-PythonExePath
             if (-not $py) {
-                Write-Host "Python executable not found. Please install Python or adjust the venv path." -ForegroundColor Red
+                Write-Host "Python-uitvoerbaar bestand niet gevonden. Installeer Python of pas het venv-pad aan." -ForegroundColor Red
                 Pause
                 continue
             }
@@ -2262,24 +2467,40 @@ function Show-BridgeScriptsMenu {
         if ($selection -eq 0) {
             $scriptPath = Join-Path $PSScriptRoot "python\DBscript\db_menu.py"
             if (-not (Test-Path $scriptPath)) {
-                Write-Host "db_menu.py not found at $scriptPath" -ForegroundColor Red
+                Write-Host "db_menu.py niet gevonden op $scriptPath" -ForegroundColor Red
                 Pause
                 continue
             }
 
-            Write-Host "Starting bridge management menu..." -ForegroundColor Yellow
+            if (-not (Show-ScriptIntro -Title "Bridgebeheer" -DescriptionLines @(
+                "Met dit script beheer je bridges in de database.",
+                "Je kunt bridges bekijken, toevoegen, wijzigen of verwijderen.",
+                "Hierna krijg je de beschikbare opties te zien."
+            ))) {
+                continue
+            }
+
+            Write-Host "Bridgebeheer-menu wordt gestart..." -ForegroundColor Yellow
             & $py $scriptPath --manage-bridges
             Pause
         }
         elseif ($selection -eq 1) {
             $scriptPath = Join-Path $PSScriptRoot "python\DBscript\list_bridges_prompt.py"
             if (-not (Test-Path $scriptPath)) {
-                Write-Host "list_bridges_prompt.py not found at $scriptPath" -ForegroundColor Red
+                Write-Host "list_bridges_prompt.py niet gevonden op $scriptPath" -ForegroundColor Red
                 Pause
                 continue
             }
 
-            Write-Host "Bridge health scan wordt gestart..." -ForegroundColor Yellow
+            if (-not (Show-ScriptIntro -Title "Bridge gezondheidsscan" -DescriptionLines @(
+                "Met dit script controleer je de gezondheid van bridges in alle databases.",
+                "Het script zoekt onder andere naar communicatieproblemen en herstarts.",
+                "Na afloop krijg je een overzicht van de resultaten."
+            ))) {
+                continue
+            }
+
+            Write-Host "Bridge gezondheidsscan wordt gestart..." -ForegroundColor Yellow
             Push-Location (Split-Path -Parent $scriptPath)
             try {
                 & $py $scriptPath --action all --export "./bridge_scan_menu_output" --gap-minutes 20 --window-days 4 --restart-window-threshold 20
@@ -2292,12 +2513,20 @@ function Show-BridgeScriptsMenu {
         elseif ($selection -eq 2) {
             $scriptPath = Join-Path $PSScriptRoot "python\DBscript\list_bridges_prompt.py"
             if (-not (Test-Path $scriptPath)) {
-                Write-Host "list_bridges_prompt.py not found at $scriptPath" -ForegroundColor Red
+                Write-Host "list_bridges_prompt.py niet gevonden op $scriptPath" -ForegroundColor Red
                 Pause
                 continue
             }
 
-            Write-Host "Poll fails scan wordt gestart..." -ForegroundColor Yellow
+            if (-not (Show-ScriptIntro -Title "Poll fail-scan" -DescriptionLines @(
+                "Met dit script zoek je bridges met veel poll failures.",
+                "Zo kun je sneller storingen of instabiele verbindingen herkennen.",
+                "Na afloop krijg je een overzicht van de gevonden bridges."
+            ))) {
+                continue
+            }
+
+            Write-Host "Poll fail-scan wordt gestart..." -ForegroundColor Yellow
             Push-Location (Split-Path -Parent $scriptPath)
             try {
                 & $py $scriptPath --action pollall --export "./pollfail_menu_output" --poll-threshold 15
@@ -2316,8 +2545,16 @@ function Show-BridgeScriptsMenu {
         elseif ($selection -eq 5) {
             $scriptPath = Join-Path $PSScriptRoot "python\DBscript\backup_recent_logs.py"
             if (-not (Test-Path $scriptPath)) {
-                Write-Host "backup_recent_logs.py not found at $scriptPath" -ForegroundColor Red
+                Write-Host "backup_recent_logs.py niet gevonden op $scriptPath" -ForegroundColor Red
                 Pause
+                continue
+            }
+
+            if (-not (Show-ScriptIntro -Title "Log Backup" -DescriptionLines @(
+                "Met dit script maak je een back-up van logtabellen van de afgelopen 14 dagen.",
+                "Daarna kun je filters op database, DeviceID en SlaveDeviceID invullen.",
+                "Laat je de database leeg, dan wordt eerst om bevestiging gevraagd."
+            ))) {
                 continue
             }
 
@@ -2377,7 +2614,7 @@ function Show-ActionMenu($server, $serviceName) {
                 Write-Host "Verbinden met $($server.Name)..." -ForegroundColor Yellow
 
 
-                ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "sudo systemctl status $serviceName --no-pager -l"
+                Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "sudo systemctl status $serviceName --no-pager -l")
 
 
                 Pause
@@ -2410,7 +2647,7 @@ function Show-ActionMenu($server, $serviceName) {
                 if ($pattern) { $tailCmd += " | grep -Ei --line-buffered --color=always '$pattern'" }
 
 
-                ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "sudo $tailCmd"
+                Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "sudo $tailCmd")
 
 
             }
@@ -2425,7 +2662,7 @@ function Show-ActionMenu($server, $serviceName) {
                 Write-Host "Herstarten $serviceName..." -ForegroundColor Yellow
 
 
-                ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "sudo systemctl restart $serviceName"
+                Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "sudo systemctl restart $serviceName")
 
 
                 Pause
@@ -2443,7 +2680,7 @@ function Show-ActionMenu($server, $serviceName) {
                 Write-Host "Stoppen $serviceName..." -ForegroundColor Yellow
 
 
-                ssh -t -o GSSAPIAuthentication=no -i $sshKey "$($server.User)@$($server.HostName)" "sudo systemctl stop $serviceName"
+                Invoke-ToolkitSsh @('-t', '-o', 'GSSAPIAuthentication=no', '-i', $sshKey, "$($server.User)@$($server.HostName)", "sudo systemctl stop $serviceName")
 
 
                 Pause
@@ -3239,7 +3476,14 @@ function Show-NodeToolsMenu {
 
 
             # Execute Node Script
-
+            if (-not (Show-ScriptIntro -Title "4850CM DB Tools" -DescriptionLines @(
+                "Met dit script voer je database-acties uit voor de 4850CM tools.",
+                "Controleer je gekozen database en actie voordat je doorgaat.",
+                "Typ q als je wilt annuleren en terug wilt gaan."
+            ))) {
+                $script:__menu_filter = ""
+                continue
+            }
 
             Write-Host "Node.js script uitvoeren..." -ForegroundColor Cyan
 
@@ -3339,7 +3583,7 @@ function Show-MainMenu {
         $menuOptions += "ICY4850CM Database Tools (Node.js)"
 
 
-        $menuOptions += "Python Scripts"
+        $menuOptions += "Python-scripts"
 
 
         $menuOptions += "Afsluiten"
@@ -3576,12 +3820,8 @@ Set-Alias -Name icy -Value Invoke-ICYDecode -Scope Global -ErrorAction SilentlyC
 # Start menu
 
 Import-ToolkitEnv -Quiet | Out-Null
-if ($env:SSH_KEY_PATH) {
-    $sshKey = $env:SSH_KEY_PATH
-}
-elseif ($env:SSH_KEY) {
-    $sshKey = $env:SSH_KEY
-}
+$script:SshKeyPath = Resolve-ToolkitSshKey
+$sshKey = $script:SshKeyPath
 
 Show-MainMenu
 

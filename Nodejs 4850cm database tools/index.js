@@ -363,6 +363,18 @@ function getPool() {
     return dbPool;
 }
 
+async function closePool() {
+    if (!dbPool) return;
+    try {
+        await dbPool.end();
+        writeLog(`POOL CLOSED for ${dbUrl || 'n/a'}`);
+    } catch (e) {
+        console.error(chalk.yellow(`Kon DB pool niet netjes sluiten: ${e.message || e}`));
+    } finally {
+        dbPool = null;
+    }
+}
+
 async function fillSchemas(force = false) {
     if (!force && Array.isArray(allSchemas) && allSchemas.length > 0) return allSchemas;
     if (!dbUrl) throw new Error('Database URL (dbUrl) is not set. Kies eerst een database.');
@@ -1746,4 +1758,17 @@ async function execute() {
         process.exit(1);
     }
 }
-execute();
+
+execute()
+    .then(async () => {
+        await closePool();
+    })
+    .catch(async (error) => {
+        try {
+            console.error(chalk.red("Onverwachte fout:"), error);
+        } catch (e) {
+            console.error(error);
+        }
+        try { await closePool(); } catch (e) {}
+        process.exit(1);
+    });
