@@ -258,7 +258,26 @@ def _export_df_prompt(df: pd.DataFrame, export_path: Path | str):
         print('No files written.')
     return written
 
-load_dotenv()
+def load_workspace_env():
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent / ".env",
+        here.parents[2] / ".env" if len(here.parents) >= 3 else None,
+        here.parents[3] / "python" / "DBscript" / ".env" if len(here.parents) >= 4 else None,
+        here.parents[3] / "DBscript" / ".env" if len(here.parents) >= 4 else None,
+        Path.cwd() / ".env",
+    ]
+
+    for env_path in candidates:
+        if env_path and env_path.exists():
+            load_dotenv(env_path, override=True)
+            return env_path
+
+    load_dotenv()
+    return None
+
+
+ENV_PATH = load_workspace_env()
 
 DB_HOST = os.getenv("DB_HOST")
 DB_HOST2 = os.getenv("DB_HOST2")

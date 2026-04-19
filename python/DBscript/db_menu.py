@@ -17,7 +17,7 @@ import getpass
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - helpful fallback when venv missing dependency
-    def load_dotenv():
+    def load_dotenv(*_args, **_kwargs):
         print("Warning: python-dotenv not installed in this environment. Skipping .env load.")
 import mysql.connector
 from typing import List, Dict, Optional
@@ -25,6 +25,7 @@ import shutil
 import sys
 import subprocess
 import tempfile
+from pathlib import Path
 
 # Cross-platform single-key reader
 if os.name == 'nt':
@@ -185,7 +186,26 @@ def show_menu(title: str, options: List[str]) -> int:
             pass
 
 
-load_dotenv()
+def load_workspace_env():
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent / ".env",
+        here.parents[2] / ".env" if len(here.parents) >= 3 else None,
+        here.parents[3] / "python" / "DBscript" / ".env" if len(here.parents) >= 4 else None,
+        here.parents[3] / "DBscript" / ".env" if len(here.parents) >= 4 else None,
+        Path.cwd() / ".env",
+    ]
+
+    for env_path in candidates:
+        if env_path and env_path.exists():
+            load_dotenv(env_path, override=True)
+            return env_path
+
+    load_dotenv()
+    return None
+
+
+ENV_PATH = load_workspace_env()
 
 DB_HOST = os.getenv("DB_HOST")
 DB_HOST2 = os.getenv("DB_HOST2")

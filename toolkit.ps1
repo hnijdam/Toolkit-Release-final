@@ -40,6 +40,9 @@ Import-Module Terminal-Icons -ErrorAction SilentlyContinue
 Import-Module PSReadLine -ErrorAction SilentlyContinue
 
 
+try { Set-Location -Path $PSScriptRoot } catch {}
+
+
 
 
 
@@ -2040,6 +2043,57 @@ function Get-PythonExePath {
 
 }
 
+function Get-DbEnvPath {
+    $parentRoot = Split-Path -Parent $PSScriptRoot
+    $candidates = @(
+        (Join-Path $PSScriptRoot "python\DBscript\.env"),
+        (Join-Path $PSScriptRoot "DBscript\.env"),
+        (Join-Path $PSScriptRoot ".env"),
+        (Join-Path $parentRoot "python\DBscript\.env"),
+        (Join-Path $parentRoot "DBscript\.env"),
+        (Join-Path $parentRoot ".env")
+    ) | Select-Object -Unique
+
+    foreach ($candidate in $candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Import-ToolkitEnv {
+    param([switch]$Quiet)
+
+    $envPath = Get-DbEnvPath
+    if (-not $envPath) {
+        if (-not $Quiet) {
+            Write-Host "Geen .env gevonden voor de DB scripts." -ForegroundColor Yellow
+        }
+        return $false
+    }
+
+    foreach ($line in Get-Content -Path $envPath) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#") -or -not $trimmed.Contains("=")) { continue }
+
+        $parts = $trimmed.Split("=", 2)
+        $key = $parts[0].Trim()
+        $value = $parts[1].Trim().Trim('"').Trim("'")
+
+        if (-not [string]::IsNullOrWhiteSpace($key)) {
+            [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+        }
+    }
+
+    if (-not $Quiet) {
+        Write-Host "DB .env geladen vanaf $envPath" -ForegroundColor DarkGray
+    }
+
+    return $true
+}
+
 
 function Show-BridgeComlogMenu {
     $py = Get-PythonExePath
@@ -2085,27 +2139,19 @@ function Show-BridgeComlogMenu {
         return
     }
 
-    $envPath = Join-Path $PSScriptRoot "python\DBscript\.env"
-    if (-not (Test-Path $envPath)) {
-        Write-Host ".env not found at $envPath" -ForegroundColor Red
+    $envLoaded = Import-ToolkitEnv -Quiet
+    $envPath = Get-DbEnvPath
+    if (-not $envLoaded -or -not $envPath) {
+        Write-Host ".env niet gevonden voor Bridge Comlog Viewer." -ForegroundColor Red
         Pause
         return
     }
 
-    $dbUser = $null
-    $dbPassword = $null
-    foreach ($line in Get-Content -Path $envPath) {
-        $trimmed = $line.Trim()
-        if (-not $trimmed -or $trimmed.StartsWith("#") -or -not $trimmed.Contains("=")) { continue }
-        $parts = $trimmed.Split("=", 2)
-        $key = $parts[0].Trim()
-        $value = $parts[1].Trim().Trim('"').Trim("'")
-        if ($key -eq "DB_USER") { $dbUser = $value }
-        elseif ($key -eq "DB_PASSWORD") { $dbPassword = $value }
-    }
+    $dbUser = [Environment]::GetEnvironmentVariable('DB_USER', 'Process')
+    $dbPassword = [Environment]::GetEnvironmentVariable('DB_PASSWORD', 'Process')
 
     if ([string]::IsNullOrWhiteSpace($dbUser) -or [string]::IsNullOrWhiteSpace($dbPassword)) {
-        Write-Host "DB_USER/DB_PASSWORD ontbreken in .env" -ForegroundColor Red
+        Write-Host "DB_USER/DB_PASSWORD ontbreken in $envPath" -ForegroundColor Red
         Pause
         return
     }
@@ -2187,6 +2233,7 @@ function Show-BridgeScriptsMenu {
         $selection = Show-Menu -Title "Python Scripts" -Options $options
 
         if ($selection -ge 0 -and $selection -le 5) {
+            Import-ToolkitEnv -Quiet | Out-Null
             $py = Get-PythonExePath
             if (-not $py) {
                 Write-Host "Python executable not found. Please install Python or adjust the venv path." -ForegroundColor Red
