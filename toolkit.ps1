@@ -40,7 +40,10 @@ Import-Module Terminal-Icons -ErrorAction SilentlyContinue
 Import-Module PSReadLine -ErrorAction SilentlyContinue
 
 
-try { Set-Location -Path $PSScriptRoot } catch {}
+$script:ToolkitRoot = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
+$script:SharedEnvPath = $null
+
+try { Set-Location -Path $script:ToolkitRoot } catch {}
 
 
 
@@ -49,7 +52,7 @@ try { Set-Location -Path $PSScriptRoot } catch {}
 # SSH sleutel
 
 
-$sshKey = "C:\Path\To\ssh-key.pem"
+$sshKey = if ($env:SSH_KEY_PATH) { $env:SSH_KEY_PATH } elseif ($env:SSH_KEY) { $env:SSH_KEY } else { "C:\Path\To\ssh-key.pem" }
 
 
 
@@ -2016,20 +2019,22 @@ function Get-PythonExePath {
     # Prefer workspace virtualenvs, fallback to the Python launcher or system python
 
 
+    $root = if (-not [string]::IsNullOrWhiteSpace($script:ToolkitRoot)) { $script:ToolkitRoot } elseif (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+
     $candidates = @(
-        (Join-Path $PSScriptRoot "python\DBscript\venv\Scripts\python.exe"),
-        (Join-Path $PSScriptRoot "python\DBscript\.venv\Scripts\python.exe"),
-        (Join-Path $PSScriptRoot "python\DBscript\virt-dahs\Scripts\python.exe"),
-        (Join-Path $PSScriptRoot "venv\Scripts\python.exe"),
-        (Join-Path $PSScriptRoot ".venv\Scripts\python.exe"),
-        (Join-Path $PSScriptRoot "virt-dahs\Scripts\python.exe")
+        (Join-Path $root "python\DBscript\venv\Scripts\python.exe"),
+        (Join-Path $root "python\DBscript\.venv\Scripts\python.exe"),
+        (Join-Path $root "python\DBscript\virt-dahs\Scripts\python.exe"),
+        (Join-Path $root "venv\Scripts\python.exe"),
+        (Join-Path $root ".venv\Scripts\python.exe"),
+        (Join-Path $root "virt-dahs\Scripts\python.exe")
     )
 
     foreach ($candidate in $candidates) {
         if (Test-Path $candidate) { return $candidate }
     }
 
-    $releaseVenv = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+    $releaseVenv = Join-Path $root ".venv\Scripts\python.exe"
     if (Test-Path $releaseVenv) { return $releaseVenv }
 
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
@@ -2044,11 +2049,13 @@ function Get-PythonExePath {
 }
 
 function Get-DbEnvPath {
-    $parentRoot = Split-Path -Parent $PSScriptRoot
+    $root = if (-not [string]::IsNullOrWhiteSpace($script:ToolkitRoot)) { $script:ToolkitRoot } elseif (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+    $parentRoot = Split-Path -Parent $root
     $candidates = @(
-        (Join-Path $PSScriptRoot "python\DBscript\.env"),
-        (Join-Path $PSScriptRoot "DBscript\.env"),
-        (Join-Path $PSScriptRoot ".env"),
+        $script:SharedEnvPath,
+        (Join-Path $root "python\DBscript\.env"),
+        (Join-Path $root "DBscript\.env"),
+        (Join-Path $root ".env"),
         (Join-Path $parentRoot "python\DBscript\.env"),
         (Join-Path $parentRoot "DBscript\.env"),
         (Join-Path $parentRoot ".env")
@@ -3557,6 +3564,13 @@ Set-Alias -Name icy -Value Invoke-ICYDecode -Scope Global -ErrorAction SilentlyC
 #>
 # Start menu
 
+Import-ToolkitEnv -Quiet | Out-Null
+if ($env:SSH_KEY_PATH) {
+    $sshKey = $env:SSH_KEY_PATH
+}
+elseif ($env:SSH_KEY) {
+    $sshKey = $env:SSH_KEY
+}
 
 Show-MainMenu
 
